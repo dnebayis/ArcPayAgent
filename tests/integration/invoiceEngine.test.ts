@@ -23,29 +23,29 @@ describe("InvoiceEngine Integration", () => {
     });
 
     describe("Field Extraction", () => {
-        it("should extract amount and currency", () => {
-            const result = engine.extractFields("Total: 50.00 USDC");
+        it("should extract amount and currency", async () => {
+            const result = await engine.extractFields("Total: 50.00 USDC");
             expect(result.amount).toBe("50.00");
             expect(result.currency).toBe("USDC");
         });
 
-        it("should extract invoice number", () => {
-            const result = engine.extractFields("Invoice #INV-2024-001\nTotal: $100.00 USD");
+        it("should extract invoice number", async () => {
+            const result = await engine.extractFields("Invoice #INV-2024-001\nTotal: $100.00 USD");
             expect(result.invoiceNumber).toBe("INV-2024-001");
         });
 
-        it("should extract date", () => {
-            const result = engine.extractFields("Date: 03/04/2026\nAmount: 25.50 USDC");
+        it("should extract date", async () => {
+            const result = await engine.extractFields("Date: 03/04/2026\nAmount: 25.50 USDC");
             expect(result.date).toBe("03/04/2026");
         });
 
-        it("should extract vendor name", () => {
-            const result = engine.extractFields("From: Acme Corporation\nTotal: 200 USDC");
+        it("should extract vendor name", async () => {
+            const result = await engine.extractFields("From: Acme Corporation\nTotal: 200 USDC");
             expect(result.vendor).toBe("Acme Corporation");
         });
 
-        it("should handle amounts with commas", () => {
-            const result = engine.extractFields("Total: 1,250.00 USD");
+        it("should handle amounts with commas", async () => {
+            const result = await engine.extractFields("Total: 1,250.00 USD");
             expect(result.amount).toBe("1250.00");
         });
     });
@@ -113,7 +113,7 @@ describe("InvoiceEngine Integration", () => {
 
             expect(mockBot.sendMessage).toHaveBeenCalledWith(
                 12345,
-                expect.stringContaining("Could not extract payment information"),
+                expect.stringContaining("I couldn't extract payment details"),
                 expect.any(Object)
             );
         });

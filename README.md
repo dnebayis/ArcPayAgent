@@ -19,11 +19,11 @@ It supports:
 - Telegram Bot API
 - Circle programmable wallets
 - Arc RPC / Arc router contracts
-- local JSON persistence in `data/`
+- local runtime persistence in `data/`
 
 ## Features
 
-- Natural-language payment commands such as `send 5 usdc jack`
+- Natural-language payment commands such as `send 5 usdc to jack`
 - Vendor address book
 - Inline payment confirmation flow
 - Invoice extraction and payment preparation
@@ -94,12 +94,12 @@ npm test
 - `create wallet`
 - `show wallet`
 - `wallet balance`
-- `send 5 usdc jack`
+- `send 5 usdc to jack`
 - `request 20 usdc`
 - `payment history`
 - `show recent payments`
 - `monthly spending`
-- `schedule payment 10 usdc aws tomorrow`
+- `schedule payment 10 usdc to aws tomorrow`
 
 ## LLM Support
 

@@ -2,10 +2,12 @@ const LEADING_FILLERS = /^(?:okay|ok|please|pls|hey|hi|hello|can you|could you|w
 
 export function normalizeInput(input: string): string {
     let normalized = input.trim();
+    const original = normalized;
 
     while (LEADING_FILLERS.test(normalized)) {
         normalized = normalized.replace(LEADING_FILLERS, "").trim();
     }
 
-    return normalized.replace(/\s+/g, " ").trim();
+    normalized = normalized.replace(/\s+/g, " ").trim();
+    return normalized || original;
 }

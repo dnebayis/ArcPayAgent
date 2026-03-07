@@ -637,7 +637,7 @@ export class IntentParser {
 
 Here's what I can do:
 
-💳 *Send payments* — "send 5 usdc jack"
+💳 *Send payments* — "send 5 usdc to jack"
 📋 *Manage vendors* — "save vendor jack 0x..."
 🔗 *Payment links* — "request 10 usdc"
 📄 *Invoice analysis* — Send me a PDF or photo
@@ -784,7 +784,7 @@ Type /help for the full command list!`;
             return {
                 action: "unknown",
                 input,
-                message: `I think you want to send a payment! Try:\n\n• \`send 5 usdc jack\`\n• \`pay 10 usdc to 0xabc...\`\n\nMake sure to include the amount and recipient.`
+                message: `I think you want to send a payment. Try:\n\n• \`send 5 usdc to jack\`\n• \`pay 10 usdc to 0xabc...\`\n\nMake sure to include the amount and recipient.`
             };
         }
 
@@ -802,7 +802,7 @@ Type /help for the full command list!`;
             return {
                 action: "unknown",
                 input,
-                message: `Need wallet help? Try:\n\n• \`create wallet\` — Generate a new wallet\n• \`my wallet\` — Show your address\n• \`status\` — Check your balance`
+                message: `Need wallet help? Try:\n\n• \`create wallet\` — Create a new wallet\n• \`show wallet\` — Show your address\n• \`wallet balance\` — Show balance and activity`
             };
         }
 
@@ -819,7 +819,7 @@ Type /help for the full command list!`;
         return {
             action: "unknown",
             input,
-            message: `I'm not sure what you mean, but here's what I can do:\n\n💳 \`send 5 usdc jack\` — Send payment\n📋 \`save vendor jack 0x...\` — Save vendor\n🔗 \`request 10 usdc\` — Payment link\n📄 Send a PDF — Invoice analysis\n👛 \`create wallet\` — New wallet\n\nType /help for all commands!`
+            message: `I'm not sure what you mean, but here's what I can do:\n\n💳 \`send 5 usdc to jack\` — Send a payment\n📋 \`save vendor jack 0x...\` — Save a vendor\n🔗 \`request 10 usdc\` — Create a payment link\n📄 Send a PDF — Analyze an invoice\n👛 \`create wallet\` — Create a wallet\n\nType /help for the full command list.`
         };
     }
 

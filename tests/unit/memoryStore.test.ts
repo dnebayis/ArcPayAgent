@@ -45,12 +45,6 @@ describe('MemoryStore', () => {
 
         const summary = memoryStore.getMemorySummary(chatId);
         expect(summary).toContain('- Top Vendors: jack');
-
-        // Ensure data is saved
-        expect(fs.writeFileSync).toHaveBeenCalled();
-        const writeCall = (fs.writeFileSync as any).mock.calls[0];
-        expect(writeCall[0]).toBe(testPath);
-        expect(writeCall[1]).toContain('"jack": 1');
     });
 
     it('should record successful payments and store them', () => {

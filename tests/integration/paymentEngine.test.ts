@@ -48,7 +48,10 @@ describe("PaymentEngine Integration", () => {
         };
 
         mockCircleClient = {
-            createTransaction: vi.fn().mockResolvedValue("circle-tx-999")
+            createTransaction: vi.fn().mockResolvedValue("circle-tx-999"),
+            waitForTerminalTransaction: vi.fn().mockResolvedValue({ id: "circle-tx-999", state: "COMPLETE", txHash: null, errorReason: null, errorDetails: null }),
+            isSuccessfulTerminalState: vi.fn().mockImplementation((state: string) => ["COMPLETE"].includes(state)),
+            isFailedTerminalState: vi.fn().mockImplementation((state: string) => ["FAILED", "DENIED", "CANCELLED"].includes(state))
         };
     });
 
@@ -95,7 +98,7 @@ describe("PaymentEngine Integration", () => {
 
         expect(mockBot.sendMessage).toHaveBeenCalledWith(
             12345,
-            expect.stringContaining("is not in your Address Book"),
+            expect.stringContaining("address book"),
             expect.any(Object)
         );
     });
@@ -108,7 +111,8 @@ describe("PaymentEngine Integration", () => {
 
         expect(mockBot.sendMessage).toHaveBeenCalledWith(
             12345,
-            expect.stringContaining("don't have a wallet")
+            expect.stringContaining("don't have a wallet yet"),
+            expect.objectContaining({ parse_mode: "Markdown" })
         );
     });
 
@@ -175,11 +179,8 @@ describe("PaymentEngine Integration", () => {
         expect(mockCircleClient.createTransaction).toHaveBeenCalledTimes(1); // the router pay call
         expect(mockCircleClient.createTransaction).toHaveBeenCalledWith("circle-wallet-123", "0xRouter", "0xencodedPay");
 
-        expect(mockBot.sendMessage).toHaveBeenCalledWith(
-            12345,
-            expect.stringContaining("Payment sent via Circle"),
-            expect.any(Object)
-        );
+        expect(mockBot.sendMessage).toHaveBeenCalledWith(12345, expect.stringContaining("Payment submitted to Circle"), expect.any(Object));
+        expect(mockBot.sendMessage).toHaveBeenCalledWith(12345, expect.stringContaining("Payment confirmed on Circle"), expect.any(Object));
     });
 
     it("should approve via circle then pay via circle when user clicks Approve", async () => {
@@ -206,11 +207,8 @@ describe("PaymentEngine Integration", () => {
         // 2. the pay
         expect(mockCircleClient.createTransaction).toHaveBeenCalledWith("circle-wallet-123", "0xRouter", "0xencodedPay");
 
-        expect(mockBot.sendMessage).toHaveBeenCalledWith(
-            12345,
-            expect.stringContaining("Payment sent via Circle"),
-            expect.any(Object)
-        );
+        expect(mockBot.sendMessage).toHaveBeenCalledWith(12345, expect.stringContaining("Payment submitted to Circle"), expect.any(Object));
+        expect(mockBot.sendMessage).toHaveBeenCalledWith(12345, expect.stringContaining("Payment confirmed on Circle"), expect.any(Object));
 
         vi.useRealTimers();
     });
@@ -263,4 +261,3 @@ describe("PaymentEngine Integration", () => {
         );
     });
 });
-

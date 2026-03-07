@@ -211,7 +211,7 @@ ${rows.join("\n")}`,
             );
         } catch (error) {
             console.error("[Payment History] failed to fetch router payments:", error);
-            bot.sendMessage(chatId, "⚠️ Could not read router payment history right now. Try `payment_history` instead.");
+            bot.sendMessage(chatId, "⚠️ I couldn't load router payment history right now. Try `payment history` instead.");
         }
     };
 
@@ -254,7 +254,7 @@ ${rows.join("\n")}`,
         if (intent.amount && intent.beneficiary) {
             paymentEngine.preparePayment(chatId, intent.beneficiary, intent.amount.toString());
         } else {
-            bot.sendMessage(chatId, "Please specify an amount and recipient. Example: send 5 usdc jack");
+            bot.sendMessage(chatId, "Please specify an amount and recipient. Example: `send 5 usdc to jack`", { parse_mode: "Markdown" });
         }
     });
 
@@ -264,7 +264,7 @@ ${rows.join("\n")}`,
             memoryStore.recordVendorAdded(chatId, intent.name);
             bot.sendMessage(chatId, `✅ Vendor saved!\n\nName: ${intent.name}\nAddress: \`${intent.address}\``, { parse_mode: "Markdown" });
         } else {
-            bot.sendMessage(chatId, "Please specify vendor name and address. Example: save vendor jack 0xabc...");
+            bot.sendMessage(chatId, "Please specify a vendor name and address. Example: `save vendor jack 0xabc...`", { parse_mode: "Markdown" });
         }
     });
 
@@ -294,7 +294,7 @@ ${rows.join("\n")}`,
     registry.register("list_vendors", "List saved vendors", (chatId) => {
         const vendors = vendorStore.getVendorsWithStats(chatId);
         if (!vendors || Object.keys(vendors).length === 0) {
-            bot.sendMessage(chatId, "No vendors saved yet. Use: save vendor <name> <address>");
+            bot.sendMessage(chatId, "No vendors saved yet. Use: `save vendor <name> <address>`", { parse_mode: "Markdown" });
             return;
         }
         let msg = "📋 **Your Vendors**\n\n";
@@ -515,7 +515,7 @@ ${rows.join("\n")}`,
 
     registry.register("schedule_payment", "Schedule a future payment", (chatId, intent) => {
         if (!intent.amount || !intent.beneficiary) {
-            bot.sendMessage(chatId, "Please specify amount, vendor, and time.\nExample: `schedule payment 10 usdc aws tomorrow`", { parse_mode: "Markdown" });
+            bot.sendMessage(chatId, "Please specify the amount, recipient, and time.\nExample: `schedule payment 10 usdc to aws tomorrow`", { parse_mode: "Markdown" });
             return;
         }
 

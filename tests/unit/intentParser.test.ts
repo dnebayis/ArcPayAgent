@@ -17,17 +17,17 @@ describe("IntentParser — Regex Layer", () => {
     });
 
     it("should parse 'send 5 usdc to 0xabc'", async () => {
-        const intent = await parser.parse(1, "send 5 usdc to 0xabc");
+        const intent = await parser.parse(1, "send 5 usdc to 0x00000000000000000000000000000000000000ab");
         expect(intent.action).toBe("create_payment");
         expect(intent.amount).toBe(5);
-        expect(intent.beneficiary).toBe("0xabc");
+        expect(intent.beneficiary).toBe("0x00000000000000000000000000000000000000ab");
     });
 
     it("should parse '0xabc send 3 usdc'", async () => {
-        const intent = await parser.parse(1, "0xabc send 3 usdc");
+        const intent = await parser.parse(1, "0x00000000000000000000000000000000000000ab send 3 usdc");
         expect(intent.action).toBe("create_payment");
         expect(intent.amount).toBe(3);
-        expect(intent.beneficiary).toBe("0xabc");
+        expect(intent.beneficiary).toBe("0x00000000000000000000000000000000000000ab");
     });
 
     it("should parse 'pay 10 usdc to jack'", async () => {
@@ -342,7 +342,7 @@ describe("ToolRouter", () => {
         const result = await router.routeIntent(12345, { action: "unknown" });
 
         expect(result).toBe(false);
-        expect(mockBot.sendMessage).toHaveBeenCalledWith(12345, expect.stringContaining("send payments"));
+        expect(mockBot.sendMessage).toHaveBeenCalledWith(12345, expect.stringContaining("wallets, payments"));
     });
 
     it("should use custom fallback message when provided", async () => {
