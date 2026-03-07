@@ -62,7 +62,7 @@ describe("PaymentEngine Integration", () => {
 
         expect(mockBot.sendMessage).toHaveBeenCalledWith(
             12345,
-            expect.stringContaining("Prepare payment"),
+            expect.stringContaining("Review payment"),
             expect.objectContaining({
                 reply_markup: {
                     inline_keyboard: [
@@ -130,7 +130,7 @@ describe("PaymentEngine Integration", () => {
         } as any);
 
         expect(mockBot.editMessageText).toHaveBeenCalledWith(
-            expect.stringContaining("Insufficient USDC balance"),
+            expect.stringContaining("Insufficient balance"),
             expect.any(Object)
         );
     });
@@ -149,7 +149,7 @@ describe("PaymentEngine Integration", () => {
         } as any);
 
         expect(mockBot.editMessageText).toHaveBeenCalledWith(
-            "Approval required to spend USDC.",
+            expect.stringContaining("Approval required before payment"),
             expect.objectContaining({
                 reply_markup: {
                     inline_keyboard: [
@@ -179,8 +179,8 @@ describe("PaymentEngine Integration", () => {
         expect(mockCircleClient.createTransaction).toHaveBeenCalledTimes(1); // the router pay call
         expect(mockCircleClient.createTransaction).toHaveBeenCalledWith("circle-wallet-123", "0xRouter", "0xencodedPay");
 
-        expect(mockBot.sendMessage).toHaveBeenCalledWith(12345, expect.stringContaining("Payment submitted to Circle"), expect.any(Object));
-        expect(mockBot.sendMessage).toHaveBeenCalledWith(12345, expect.stringContaining("Payment confirmed on Circle"), expect.any(Object));
+        expect(mockBot.sendMessage).toHaveBeenCalledWith(12345, expect.stringContaining("Payment submitted"), expect.any(Object));
+        expect(mockBot.sendMessage).toHaveBeenCalledWith(12345, expect.stringContaining("Payment confirmed"), expect.any(Object));
     });
 
     it("should approve via circle then pay via circle when user clicks Approve", async () => {
@@ -207,8 +207,8 @@ describe("PaymentEngine Integration", () => {
         // 2. the pay
         expect(mockCircleClient.createTransaction).toHaveBeenCalledWith("circle-wallet-123", "0xRouter", "0xencodedPay");
 
-        expect(mockBot.sendMessage).toHaveBeenCalledWith(12345, expect.stringContaining("Payment submitted to Circle"), expect.any(Object));
-        expect(mockBot.sendMessage).toHaveBeenCalledWith(12345, expect.stringContaining("Payment confirmed on Circle"), expect.any(Object));
+        expect(mockBot.sendMessage).toHaveBeenCalledWith(12345, expect.stringContaining("Payment submitted"), expect.any(Object));
+        expect(mockBot.sendMessage).toHaveBeenCalledWith(12345, expect.stringContaining("Payment confirmed"), expect.any(Object));
 
         vi.useRealTimers();
     });

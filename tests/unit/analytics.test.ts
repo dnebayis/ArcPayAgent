@@ -182,7 +182,7 @@ describe("AnalyticsEngine", () => {
 
         expect(mockBot.sendMessage).toHaveBeenCalledWith(
             1,
-            expect.stringContaining("Recent Payments"),
+            expect.stringContaining("Payment History"),
             expect.any(Object)
         );
     });

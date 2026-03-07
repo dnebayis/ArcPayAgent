@@ -64,7 +64,7 @@ describe("InvoiceEngine Integration", () => {
 
             expect(mockBot.sendMessage).toHaveBeenCalledWith(
                 12345,
-                expect.stringContaining("Invoice detected"),
+                expect.stringContaining("Invoice summary"),
                 expect.objectContaining({
                     reply_markup: {
                         inline_keyboard: [
