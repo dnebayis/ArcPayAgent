@@ -3,7 +3,6 @@ import { WalletStore } from "../storage/walletStore";
 import { VendorStore } from "../storage/vendorStore";
 import { PaymentEngine } from "../engines/paymentEngine";
 import { IntentParser } from "../ai/intentParser";
-import { LLMKeyStore } from "../storage/llmKeyStore";
 import { InvoiceEngine } from "../engines/invoiceEngine";
 import { PaymentRequestEngine } from "../engines/paymentRequestEngine";
 import { ToolRouter } from "../agent/toolRouter";
@@ -15,7 +14,7 @@ export function setupHandlers(
     bot: TelegramBot,
     walletStore: WalletStore,
     vendorStore: VendorStore,
-    llmKeyStore: LLMKeyStore,
+    llmKeyStore: any,
     toolRouter: ToolRouter,
     intentParser: IntentParser,
     paymentEngine?: PaymentEngine,
@@ -25,6 +24,54 @@ export function setupHandlers(
     scheduleStore?: ScheduleStore,
     userPreferencesStore?: UserPreferencesStore
 ) {
+    const helpMessage = `📖 *ArcPay Agent — Command Guide*
+
+*Wallet*
+• \`create wallet\` — Create your wallet
+• \`show wallet\` — Show your wallet address
+• \`wallet balance\` — Show balance and explorer activity
+• \`status\` — Show account status
+• \`export wallet\` — Show wallet export details
+
+*Payments*
+• \`send 5 usdc to jack\` — Send to a saved vendor
+• \`send 5 usdc to 0x...\` — Send to a wallet address
+• \`request 20 usdc\` — Create a payment link
+
+*Vendors*
+• \`save vendor jack 0x...\` — Save a vendor
+• \`my vendors\` — List saved vendors
+• \`vendor jack\` — Show vendor details
+• \`top vendors\` — Show top vendors
+• \`remove vendor jack\` — Remove one vendor
+
+*Invoices*
+• Send a PDF or photo invoice
+• \`analyze invoice\` — Ask for invoice extraction
+• \`pay that invoice\` — Use the last analyzed invoice
+
+*Schedules*
+• \`schedule payment 10 usdc to aws tomorrow\` — Create a schedule
+• \`list schedules\` — List active schedules
+• \`cancel schedule <id>\` — Cancel a schedule
+
+*History & Reports*
+• \`payment history\` — Show recent payments
+• \`show recent payments\` — Show router activity
+• \`show pending payments\` — Show pending router status
+• \`report\` — Show spending summary
+• \`spending by vendor\` — Show vendor breakdown
+• \`monthly spending\` — Show monthly totals
+
+_Tip: Natural language works too. Example: “send 10 usdc to jack”, “show recent payments”, “pay the invoice”._`;
+
+    bot.setMyCommands([
+        { command: "start", description: "Open the ArcPay quick start guide" },
+        { command: "help", description: "Show the full command guide" },
+    ]).catch((error) => {
+        console.warn("[Telegram] Failed to register bot commands:", error);
+    });
+
     bot.on('message', async (msg) => {
         const chatId = msg.chat.id;
         if (msg.from?.language_code && userPreferencesStore) {
@@ -138,88 +185,22 @@ Only the wallet owner can use payment, request, and schedule action buttons.`;
 
         // ── /help command ──
         if (text === "/help") {
-            const help = `📖 *ArcPay Agent — Command Guide*
-
-*Wallet*
-• \`create wallet\` — Create your wallet
-• \`show wallet\` — Show your wallet address
-• \`wallet balance\` — Show balance and explorer activity
-• \`status\` — Show account status
-• \`export wallet\` — Show wallet export details
-
-*Payments*
-• \`send 5 usdc to jack\` — Send to a saved vendor
-• \`send 5 usdc to 0x...\` — Send to a wallet address
-• \`request 20 usdc\` — Create a payment link
-
-*Vendors*
-• \`save vendor jack 0x...\` — Save a vendor
-• \`my vendors\` — List saved vendors
-• \`vendor jack\` — Show vendor details
-• \`top vendors\` — Show top vendors
-• \`remove vendor jack\` — Remove one vendor
-
-*Invoices*
-• Send a PDF or photo invoice
-• \`analyze invoice\` — Ask for invoice extraction
-• \`pay that invoice\` — Use the last analyzed invoice
-
-*Schedules*
-• \`schedule payment 10 usdc to aws tomorrow\` — Create a schedule
-• \`list schedules\` — List active schedules
-• \`cancel schedule <id>\` — Cancel a schedule
-
-*History & Reports*
-• \`payment history\` — Show recent payments
-• \`show recent payments\` — Show router activity
-• \`show pending payments\` — Show pending router status
-• \`report\` — Show spending summary
-• \`spending by vendor\` — Show vendor breakdown
-• \`monthly spending\` — Show monthly totals
-
-*LLM*
-• \`/llmkey set openai sk-...\` — Save your LLM key
-• \`/llmkey model gpt-4o\` — Set the model
-• \`/llmkey status\` — Show LLM key status
-• \`/llmkey remove\` — Remove the saved key
-
-_Tip: Natural language works too. Example: “send 10 usdc to jack”, “show recent payments”, “pay the invoice”._`;
-            bot.sendMessage(chatId, help, { parse_mode: "Markdown" });
+            bot.sendMessage(chatId, helpMessage, { parse_mode: "Markdown" });
             return;
         }
 
-        // ── /llmkey commands (must bypass intent parser) ──
-        const llmSetMatch = originalText.match(/^\/llmkey\s+set\s+([a-zA-Z0-9_-]+)\s+(.+)/i);
-        if (llmSetMatch) {
-            const provider = llmSetMatch[1];
-            const key = llmSetMatch[2];
-            llmKeyStore.setKey(chatId, provider, key);
-            bot.sendMessage(chatId, `✅ LLM Key successfully saved for provider: ${provider}`);
+        if (text === "/health" || text === "/ready") {
+            const endpoint = text === "/health" ? "/health" : "/ready";
+            bot.sendMessage(
+                chatId,
+                `\`${endpoint}\` is an HTTP endpoint, not a Telegram command.\n\nUse it in your browser or with curl against your deployed service URL.\n\nExample:\n\`https://your-service.onrender.com${endpoint}\``,
+                { parse_mode: "Markdown" }
+            );
             return;
         }
 
-        const llmModelMatch = originalText.match(/^\/llmkey\s+model\s+(.+)/i);
-        if (llmModelMatch) {
-            // Support both `/llmkey model gpt-4o` and `/llmkey model openai gpt-4o`
-            const parts = llmModelMatch[1].trim().split(/\s+/);
-            const model = parts[parts.length - 1];
-            const updated = llmKeyStore.setModel(chatId, model);
-            if (updated) {
-                bot.sendMessage(chatId, `✅ LLM Model updated to: ${model}`);
-            } else {
-                bot.sendMessage(chatId, "❌ Please set an LLM Key first using `/llmkey set`.");
-            }
-            return;
-        }
-
-        if (text === "/llmkey remove") {
-            const removed = llmKeyStore.removeKey(chatId);
-            bot.sendMessage(chatId, removed ? "✅ LLM Key removed." : "No LLM Key found to remove.");
-            return;
-        }
-
-        if (text === "/llmkey status") {
-            bot.sendMessage(chatId, llmKeyStore.getStatus(chatId));
+        if (text.startsWith("/llmkey")) {
+            bot.sendMessage(chatId, "LLM key commands are currently disabled.");
             return;
         }
 
