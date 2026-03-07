@@ -28,6 +28,8 @@ import { parseScheduleDate, formatScheduleTime } from "./utils/dateParser";
 import { MemoryStore } from "./ai/memoryStore";
 import { flushPersistence, getPersistenceBackend, initializePersistence } from "./storage/persistence";
 import { markBotReady, markPersistenceReady, markSchedulerReady } from "./appStatus";
+import { UserPreferencesStore } from "./storage/userPreferences";
+import { formatUserDateTime } from "./utils/userDateTime";
 
 dotenv.config();
 
@@ -227,6 +229,7 @@ ${rows.join("\n")}`,
     const invoiceStore = new InvoiceStore();
     const paymentRequestStore = new PaymentRequestStore();
     const paymentLogStore = new PaymentLogStore();
+    const userPreferencesStore = new UserPreferencesStore();
 
     const usdc = new USDC(provider, usdcAddress);
     const router = new ArcRouter(provider, routerAddress);
@@ -242,7 +245,7 @@ ${rows.join("\n")}`,
     const paymentRequestEngine = new PaymentRequestEngine(bot, paymentRequestStore, walletStore, botUsername);
     const analyticsEngine = new AnalyticsEngine(bot, paymentLogStore);
     const scheduleStore = new ScheduleStore();
-    const schedulerService = new SchedulerService(bot, scheduleStore, paymentEngine);
+    const schedulerService = new SchedulerService(bot, scheduleStore, paymentEngine, userPreferencesStore);
 
     // ── Register tools ──
     const registry = new ToolRegistry();
@@ -575,10 +578,11 @@ ${rows.join("\n")}`,
             chatId, scheduleLabel, scheduleAddress,
             intent.amount, scheduleTime, frequency
         );
+        const preferences = userPreferencesStore.getPreferences(chatId);
 
         bot.sendMessage(
             chatId,
-            `✅ **Payment scheduled**\n\n${schedule.amount} USDC → **${schedule.vendor}**\nExecution: ${formatScheduleTime(schedule.nextExecution)}\nFrequency: ${schedule.frequency}\nID: \`${schedule.id}\``,
+            `✅ **Payment scheduled**\n\n${schedule.amount} USDC → **${schedule.vendor}**\nExecution: ${formatUserDateTime(schedule.nextExecution, preferences)}\nFrequency: ${schedule.frequency}\nID: \`${schedule.id}\``,
             { parse_mode: "Markdown" }
         );
     });
@@ -591,8 +595,9 @@ ${rows.join("\n")}`,
         }
 
         let msg = "📅 **Scheduled Payments**\n\n";
+        const preferences = userPreferencesStore.getPreferences(chatId);
         for (const s of schedules) {
-            msg += `• \`${s.id}\` — **${s.amount} USDC** → ${s.vendor} (${formatScheduleTime(s.nextExecution)}, ${s.frequency})\n`;
+            msg += `• \`${s.id}\` — **${s.amount} USDC** → ${s.vendor} (${formatUserDateTime(s.nextExecution, preferences)}, ${s.frequency})\n`;
         }
         bot.sendMessage(chatId, msg, { parse_mode: "Markdown" });
     });
@@ -616,7 +621,7 @@ ${rows.join("\n")}`,
         bot, walletStore, vendorStore, llmKeyStore,
         toolRouter, intentParser,
         paymentEngine, invoiceEngine, paymentRequestEngine,
-        conversationMemory, scheduleStore
+        conversationMemory, scheduleStore, userPreferencesStore
     );
     markBotReady();
 

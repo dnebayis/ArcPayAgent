@@ -5,6 +5,42 @@
 export function parseScheduleDate(text: string): number | null {
     const lower = text.toLowerCase().trim();
     const now = new Date();
+    const timeOfDayMatch = lower.match(/^(tomorrow|today|next\s+(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday))\s+(\d{1,2}):(\d{2})$/i);
+
+    if (timeOfDayMatch) {
+        const baseExpr = timeOfDayMatch[1].toLowerCase();
+        const hours = parseInt(timeOfDayMatch[2], 10);
+        const minutes = parseInt(timeOfDayMatch[3], 10);
+
+        if (hours >= 0 && hours <= 23 && minutes >= 0 && minutes <= 59) {
+            let baseTimestamp: number | null = null;
+
+            if (baseExpr === "tomorrow") {
+                const d = new Date(now);
+                d.setDate(d.getDate() + 1);
+                baseTimestamp = d.getTime();
+            } else if (baseExpr === "today") {
+                baseTimestamp = now.getTime();
+            } else {
+                const dayNames = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
+                const targetDay = dayNames.indexOf(baseExpr.replace(/^next\s+/, ""));
+                if (targetDay >= 0) {
+                    const d = new Date(now);
+                    const currentDay = d.getDay();
+                    let daysUntil = targetDay - currentDay;
+                    if (daysUntil <= 0) daysUntil += 7;
+                    d.setDate(d.getDate() + daysUntil);
+                    baseTimestamp = d.getTime();
+                }
+            }
+
+            if (baseTimestamp !== null) {
+                const d = new Date(baseTimestamp);
+                d.setHours(hours, minutes, 0, 0);
+                return d.getTime();
+            }
+        }
+    }
 
     // "tomorrow"
     if (lower === "tomorrow" || lower === "yarın" || lower === "yarin") {

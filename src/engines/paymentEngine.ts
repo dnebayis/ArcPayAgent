@@ -150,7 +150,7 @@ export class PaymentEngine {
 
     async preparePayment(chatId: number, beneficiary: string, amountStr: string, memo: string | null = "ArcPay") {
         if (!amountStr || isNaN(parseFloat(amountStr)) || parseFloat(amountStr) <= 0) {
-            this.bot.sendMessage(chatId, "Please specify a valid amount. Example: `send 5 usdc jack`", { parse_mode: "Markdown" });
+            this.bot.sendMessage(chatId, "Please enter a valid amount. Example: `send 5 usdc to jack`", { parse_mode: "Markdown" });
             return;
         }
 
@@ -171,9 +171,9 @@ export class PaymentEngine {
                 vendorName = inputName.toLowerCase();
                 resolvedBeneficiary = vendorAddress;
             } else {
-                this.bot.sendMessage(chatId, `⚠️ The recipient "**${inputName}**" is not in your Address Book.\n\n` +
-                    `**Option 1:** Pay directly without saving:\n\`send ${amountStr} USDC to 0x...\`\n\n` +
-                    `**Option 2:** Save them for future invoices:\n\`save vendor ${inputName} 0x...\``,
+                this.bot.sendMessage(chatId, `⚠️ I couldn't find **${inputName}** in your address book.\n\n` +
+                    `**Option 1:** Pay directly with an address:\n\`send ${amountStr} usdc to 0x...\`\n\n` +
+                    `**Option 2:** Save the vendor first:\n\`save vendor ${inputName} 0x...\``,
                     { parse_mode: "Markdown" });
                 return;
             }
@@ -181,7 +181,7 @@ export class PaymentEngine {
 
         const walletAddress = this.walletStore.getWalletAddress(chatId);
         if (!walletAddress) {
-            this.bot.sendMessage(chatId, "You don't have a wallet yet. Send 'create wallet' to generate one before making payments.");
+            this.bot.sendMessage(chatId, "You don't have a wallet yet. Send `create wallet` before making payments.", { parse_mode: "Markdown" });
             return;
         }
 
@@ -226,7 +226,7 @@ export class PaymentEngine {
         const payment = this.pendingPay[chatIdStr];
 
         if (!payment) {
-            this.bot.sendMessage(chatId, "❌ No active pending payment found to update.");
+            this.bot.sendMessage(chatId, "❌ No pending payment found to update.");
             return;
         }
 
@@ -257,7 +257,7 @@ export class PaymentEngine {
                     payment.vendorName = updates.vendor.toLowerCase();
                     payment.beneficiary = vendorAddress;
                 } else {
-                    this.bot.sendMessage(chatId, `⚠️ Vendor "**${updates.vendor}**" not found in Address Book. Update failed.`, { parse_mode: "Markdown" });
+                    this.bot.sendMessage(chatId, `⚠️ I couldn't find **${updates.vendor}** in your address book.`, { parse_mode: "Markdown" });
                     return;
                 }
             }

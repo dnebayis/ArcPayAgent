@@ -9,6 +9,7 @@ import { PaymentRequestEngine } from "../engines/paymentRequestEngine";
 import { ToolRouter } from "../agent/toolRouter";
 import { ConversationMemory } from "../agent/conversationMemory";
 import { ScheduleStore } from "../storage/schedules";
+import { UserPreferencesStore } from "../storage/userPreferences";
 
 export function setupHandlers(
     bot: TelegramBot,
@@ -21,10 +22,14 @@ export function setupHandlers(
     invoiceEngine?: InvoiceEngine,
     paymentRequestEngine?: PaymentRequestEngine,
     conversationMemory?: ConversationMemory,
-    scheduleStore?: ScheduleStore
+    scheduleStore?: ScheduleStore,
+    userPreferencesStore?: UserPreferencesStore
 ) {
     bot.on('message', async (msg) => {
         const chatId = msg.chat.id;
+        if (msg.from?.language_code && userPreferencesStore) {
+            userPreferencesStore.setLocaleIfMissing(chatId, msg.from.language_code);
+        }
 
         // ── Handle document uploads (PDF invoices) ──
         if (msg.document && invoiceEngine) {
@@ -111,77 +116,74 @@ export function setupHandlers(
         if (text === "/start") {
             const startMessage = `🚀 *Welcome to ArcPay Agent*
 
-ArcPay Agent is your payment assistant on Arc Network testnet.
+ArcPay helps you manage wallets, vendors, payments, invoices, and schedules on Arc testnet.
 
-Run these to get started:
+*Start here*
 • \`create wallet\`
 • \`show wallet\`
-• \`send 5 usdc jack\`
+• \`save vendor jack 0x...\`
+• \`send 5 usdc to jack\`
+
+*Also supported*
+• Send a PDF or photo invoice
 • \`request 20 usdc\`
-• Upload a PDF/image invoice to extract and pay it
+• \`schedule payment 10 usdc to aws tomorrow\`
 
-Useful shortcuts:
-• \`help\` (or \`/help\`) to see all commands
-• \`report\` to check spending
-• \`show recent payments\` for latest transaction activity
+Type \`help\` or \`/help\` to see the full command list.
 
-Security note:
-• Only the wallet owner can act on payment/request/schedule buttons.
-
-I keep it minimal and deterministic by default; ask me in plain language and I'll also understand natural requests.`;
+Only the wallet owner can use payment, request, and schedule action buttons.`;
             bot.sendMessage(chatId, startMessage, { parse_mode: "Markdown" });
             return;
         }
 
         // ── /help command ──
         if (text === "/help") {
-            const help = `📖 *ArcPay Agent — Command Reference*
+            const help = `📖 *ArcPay Agent — Command Guide*
 
-*⚡ Quick Start*
-• \`create wallet\` — Create your Circle wallet
-• \`show wallet\` — Show wallet address
-• \`my vendors\` / \`save vendor jack 0x...\` — Manage vendor list
-• \`send 5 usdc jack\` — Send USDC
-• \`request 20 usdc\` — Generate a shareable payment link
+*Wallet*
+• \`create wallet\` — Create your wallet
+• \`show wallet\` — Show your wallet address
+• \`wallet balance\` — Show balance and explorer activity
+• \`status\` — Show account status
+• \`export wallet\` — Show wallet export details
 
-*💳 Payments*
-• \`send 3 usdc 0x...\` / \`pay 3 usdc to alice\` — Send to address or vendor
-• \`schedule payment 10 usdc aws tomorrow\` — Create scheduled payment
-• \`list schedules\` / \`cancel schedule <id>\` — Manage future payments
+*Payments*
+• \`send 5 usdc to jack\` — Send to a saved vendor
+• \`send 5 usdc to 0x...\` — Send to a wallet address
+• \`request 20 usdc\` — Create a payment link
 
-*🧾 Invoice Workflow*
+*Vendors*
+• \`save vendor jack 0x...\` — Save a vendor
+• \`my vendors\` — List saved vendors
+• \`vendor jack\` — Show vendor details
+• \`top vendors\` — Show top vendors
+• \`remove vendor jack\` — Remove one vendor
+
+*Invoices*
 • Send a PDF or photo invoice
-• \`analyze invoice\` — Request extraction explicitly
-• \`pay the invoice\` / \`pay that invoice\` after extraction
+• \`analyze invoice\` — Ask for invoice extraction
+• \`pay that invoice\` — Use the last analyzed invoice
 
-• Payment control callbacks:
-  - \`confirm\` → continue payment
-  - \`cancel\` → cancel payment
-  - \`approve\` → approve USDC spend when required
+*Schedules*
+• \`schedule payment 10 usdc to aws tomorrow\` — Create a schedule
+• \`list schedules\` — List active schedules
+• \`cancel schedule <id>\` — Cancel a schedule
 
-*📚 History & Intelligence*
-• \`payment history\` or \`report\` — Recent local payment history
-• \`show recent payments\` — On-chain router activity (chunked scan)
-• \`show pending payments\` — Router pending status/info
+*History & Reports*
+• \`payment history\` — Show recent payments
+• \`show recent payments\` — Show router activity
+• \`show pending payments\` — Show pending router status
+• \`report\` — Show spending summary
+• \`spending by vendor\` — Show vendor breakdown
+• \`monthly spending\` — Show monthly totals
 
-*📈 Reports*
-• \`report\` — Spending summary (last 30 days)
-• \`spending by vendor\` — Vendor breakdown
-• \`payment history\` — Last transaction list
-• \`monthly spending\` — Monthly totals
-
-*🤖 AI / LLM*
+*LLM*
 • \`/llmkey set openai sk-...\` — Save your LLM key
-• \`/llmkey model gpt-4o\` — Change model
-• \`/llmkey status\` — Check status
-• \`/llmkey remove\` — Remove key
+• \`/llmkey model gpt-4o\` — Set the model
+• \`/llmkey status\` — Show LLM key status
+• \`/llmkey remove\` — Remove the saved key
 
-*🔧 Wallet/Account*
-• \`status\` — Account status
-• \`wallet_intelligence\` — Wallet balance + explorer activity
-• \`export wallet\` — Export wallet details
-
-_Tip: You can use natural language too; examples: “send 10 usdc to jack”, “pay the invoice”, “show recent payments”._`;
+_Tip: Natural language works too. Example: “send 10 usdc to jack”, “show recent payments”, “pay the invoice”._`;
             bot.sendMessage(chatId, help, { parse_mode: "Markdown" });
             return;
         }

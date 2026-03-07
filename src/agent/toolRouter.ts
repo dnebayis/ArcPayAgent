@@ -32,7 +32,7 @@ export class ToolRouter {
         const tool = this.registry.get(intent.action);
 
         if (!tool) {
-            const fallbackMsg = intent.message || "I can help you send payments, analyze invoices, create payment requests, or show spending reports.";
+            const fallbackMsg = intent.message || "I can help with wallets, payments, vendors, invoices, schedules, and spending reports.";
             this.bot.sendMessage(chatId, fallbackMsg);
             return false;
         }
@@ -50,7 +50,7 @@ export class ToolRouter {
             }
             return true;
         } catch (error: any) {
-            this.bot.sendMessage(chatId, `❌ Error executing action: ${error.message}`);
+            this.bot.sendMessage(chatId, `❌ I couldn't complete that action: ${error.message}`);
             return false;
         }
     }

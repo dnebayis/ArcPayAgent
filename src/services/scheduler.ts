@@ -1,6 +1,8 @@
 import TelegramBot from "node-telegram-bot-api";
 import { ScheduleStore } from "../storage/schedules";
 import { PaymentEngine } from "../engines/paymentEngine";
+import { UserPreferencesStore } from "../storage/userPreferences";
+import { formatUserDateTime } from "../utils/userDateTime";
 
 export class SchedulerService {
     private timer: ReturnType<typeof setInterval> | null = null;
@@ -8,7 +10,8 @@ export class SchedulerService {
     constructor(
         private bot: TelegramBot,
         private scheduleStore: ScheduleStore,
-        private paymentEngine: PaymentEngine
+        private paymentEngine: PaymentEngine,
+        private userPreferencesStore: UserPreferencesStore
     ) { }
 
     /**
@@ -43,10 +46,12 @@ export class SchedulerService {
             console.log(`[Scheduler] Due: ${schedule.amount} USDC → ${schedule.vendor} for chatId=${chatId}`);
 
             const freqLabel = schedule.frequency === "once" ? "" : ` (${schedule.frequency})`;
+            const preferences = this.userPreferencesStore.getPreferences(chatId);
+            const scheduledFor = formatUserDateTime(schedule.nextExecution, preferences);
 
             this.bot.sendMessage(
                 chatId,
-                `⏰ **Scheduled payment ready**${freqLabel}\n\n${schedule.amount} USDC → **${schedule.vendor}**`,
+                `⏰ **Scheduled payment ready**${freqLabel}\n\n${schedule.amount} USDC → **${schedule.vendor}**\nScheduled for: ${scheduledFor}`,
                 {
                     parse_mode: "Markdown",
                     reply_markup: {

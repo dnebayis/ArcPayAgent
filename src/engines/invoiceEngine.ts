@@ -113,6 +113,88 @@ export class InvoiceEngine {
         return lines;
     }
 
+    private normalizeAmountValue(raw: string): string {
+        if (/\d{1,3}\.\d{3}/.test(raw) || /,\d{2}$/.test(raw)) {
+            return raw.replace(/\./g, "").replace(",", ".");
+        }
+        return raw.replace(/,/g, "");
+    }
+
+    private inferDefaultCurrency(text: string): string {
+        const upperText = text.toUpperCase();
+
+        if (/\bUSDC\b/i.test(text)) return "USDC";
+        if (/\bEURC\b/i.test(text)) return "EURC";
+        if (/\bUSD\b/i.test(text) || /\$/.test(text) || /\bPAID ON\b/i.test(upperText)) return "USD";
+        if (/\bEUR\b/i.test(text) || /€/.test(text)) return "EUR";
+        if (/\bTRY\b/i.test(text) || /\bTL\b/i.test(text) || /₺/.test(text)) return "TRY";
+        return "USD";
+    }
+
+    private extractAmountCandidate(text: string): { amount: string; currency: string } | null {
+        const lines = text
+            .split(/\r?\n/)
+            .map(line => line.trim())
+            .filter(Boolean);
+
+        const candidates: Array<{ amount: string; currency: string; score: number }> = [];
+
+        const keywordScore = (line: string): number => {
+            let score = 0;
+            if (/(amount\s*paid|total\s*paid|net\s*paid|grand\s*total|invoice\s*total|payment\s*due)/i.test(line)) score += 8;
+            if (/(total|balance|due|amount|paid\s+on)/i.test(line)) score += 5;
+            if (/(ödenecek\s*tutar|toplam\s*borç|toplam\s*tutar|son\s*ödeme\s*tutarı|bakiye)/i.test(line)) score += 5;
+            return score;
+        };
+
+        const pushCandidate = (rawAmount: string, currency: string | null, line: string, bonus: number = 0) => {
+            const normalizedCurrency = (currency || this.inferDefaultCurrency(line)).toUpperCase();
+            const finalCurrency = normalizedCurrency === "TL" || normalizedCurrency === "₺" ? "TRY" : normalizedCurrency;
+            candidates.push({
+                amount: this.normalizeAmountValue(rawAmount),
+                currency: finalCurrency,
+                score: keywordScore(line) + bonus
+            });
+        };
+
+        for (const line of lines) {
+            const symbolFirstPatterns: Array<{ regex: RegExp; currency: string; bonus: number }> = [
+                { regex: /\$\s*(\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{1,2})?)/i, currency: "USD", bonus: 8 },
+                { regex: /€\s*(\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{1,2})?)/i, currency: "EUR", bonus: 8 },
+                { regex: /₺\s*(\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{1,2})?)/i, currency: "TRY", bonus: 8 }
+            ];
+
+            for (const pattern of symbolFirstPatterns) {
+                const match = line.match(pattern.regex);
+                if (match) {
+                    pushCandidate(match[1], pattern.currency, line, pattern.bonus);
+                }
+            }
+
+            const explicitCurrencyPattern = /(\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{1,2})?)\s*(USDC|USD|EURC|EUR|TRY|TL)\b/i;
+            const explicitCurrencyMatch = line.match(explicitCurrencyPattern);
+            if (explicitCurrencyMatch) {
+                pushCandidate(explicitCurrencyMatch[1], explicitCurrencyMatch[2], line, 7);
+            }
+
+            const genericKeywordPattern = /(?:amount\s*paid|total\s*paid|net\s*paid|grand\s*total|invoice\s*total|payment\s*due|total|balance|due|amount|ödenecek\s*tutar|toplam\s*borç|toplam\s*tutar|son\s*ödeme\s*tutarı|bakiye)[:\s]*[$€₺]?\s*(\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{1,2})?)/i;
+            const genericKeywordMatch = line.match(genericKeywordPattern);
+            if (genericKeywordMatch) {
+                pushCandidate(genericKeywordMatch[1], null, line, 4);
+            }
+        }
+
+        if (candidates.length === 0) {
+            return null;
+        }
+
+        candidates.sort((a, b) => b.score - a.score);
+        return {
+            amount: candidates[0].amount,
+            currency: candidates[0].currency
+        };
+    }
+
     /**
      * Step 2a — Extract text from PDF using pdf-parse, with OCR fallback
      */
@@ -159,102 +241,12 @@ export class InvoiceEngine {
      */
     async extractFields(text: string): Promise<ExtractedInvoice> {
         // Amount + Currency
-        // Strategy: Find ALL potential amounts, prefer "amount paid"/"ödenecek tutar" > "total"/"toplam" > others
         let amount: string | null = null;
         let currency: string | null = null;
-        const upperText = text.toUpperCase();
-
-        const inferDefaultCurrency = (): string => {
-            if (/\bUSDC\b/i.test(text)) return "USDC";
-            if (/\bUSD\b/i.test(text) || /\$/.test(text) || /\bPAID ON\b/i.test(upperText)) return "USD";
-            if (/\bEURC\b/i.test(text)) return "EURC";
-            if (/\bEUR\b/i.test(text) || /€/.test(text)) return "EUR";
-            if (/\bTRY\b/i.test(text) || /\bTL\b/i.test(text) || /₺/.test(text)) return "TRY";
-            return "USD";
-        };
-
-        // Helper: Turkish uses comma as decimal (1.234,56) — normalize to 1234.56
-        const normalizeTurkishAmount = (raw: string): string => {
-            // If format is 1.234,56 → remove dots, replace comma with dot
-            if (/\d{1,3}\.\d{3}/.test(raw) || /,\d{2}$/.test(raw)) {
-                return raw.replace(/\./g, "").replace(",", ".");
-            }
-            return raw.replace(/,/g, "");
-        };
-
-        // Highest priority: "Amount paid" / "Ödenecek tutar" / "Toplam borç"
-        const paidPatterns = [
-            /(?:amount\s*paid|total\s*paid|net\s*paid)[:\s]*\$?\s*(\d{1,3}(?:[,]\d{3})*(?:\.\d{1,2})?)\s*(USDC|USD|EUR|EURC)?/i,
-            /\$\s*(\d{1,3}(?:[,]\d{3})*(?:\.\d{1,2})?)\s*paid/i,
-            // Turkish: "Ödenecek Tutar" / "Toplam Borç" / "Toplam Tutar"
-            /(?:ödenecek\s*tutar|toplam\s*borç|toplam\s*tutar|son\s*ödeme\s*tutarı)[:\s]*[₺]?\s*([\d.,]+)\s*(TL|₺|USDC|USD|EUR)?/i,
-        ];
-
-        for (const pattern of paidPatterns) {
-            const match = text.match(pattern);
-            if (match) {
-                amount = normalizeTurkishAmount(match[1]);
-                currency = (match[2] || inferDefaultCurrency()).toUpperCase();
-                if (currency === "₺" || currency === "TL") currency = "TRY";
-                break;
-            }
-        }
-
-        // Second priority: "Total"/"Toplam" (find the LAST one)
-        if (!amount) {
-            const totalPattern = /(?:total|grand\s*total|toplam|genel\s*toplam)[:\s]*[₺$]?\s*([\d.,]+)\s*(TL|₺|USDC|USD|EUR|EURC|TRY)?/gi;
-            let match;
-            while ((match = totalPattern.exec(text)) !== null) {
-                amount = normalizeTurkishAmount(match[1]);
-                currency = (match[2] || inferDefaultCurrency()).toUpperCase();
-                if (currency === "₺" || currency === "TL") currency = "TRY";
-            }
-        }
-
-        // Third: "$X.XX paid on" pattern
-        if (!amount) {
-            const paidOnMatch = text.match(/\$\s*(\d{1,3}(?:[,]\d{3})*(?:\.\d{1,2})?)\s*paid\s*on/i);
-            if (paidOnMatch) {
-                amount = paidOnMatch[1].replace(/,/g, "");
-                currency = "USD";
-            }
-        }
-
-        // Fourth: Turkish Lira amounts — "₺123,45" or "123,45 TL"
-        if (!amount) {
-            const tlMatch = text.match(/[₺]\s*([\d.,]+)/i) || text.match(/([\d.,]+)\s*(?:TL|₺)/i);
-            if (tlMatch) {
-                amount = normalizeTurkishAmount(tlMatch[1]);
-                currency = "TRY";
-            }
-        }
-
-        // Fifth: explicit currency amounts
-        if (!amount) {
-            const currencyMatch = text.match(/(\d{1,3}(?:[,]\d{3})*(?:\.\d{1,2})?)\s*(USDC|USD|EUR|EURC)/i);
-            if (currencyMatch) {
-                amount = currencyMatch[1].replace(/,/g, "");
-                currency = currencyMatch[2].toUpperCase();
-            }
-        }
-
-        // Sixth: "Due"/"Borç"/"Balance" amounts
-        if (!amount) {
-            const dueMatch = text.match(/(?:due|balance|borç|bakiye)[:\s]*[₺$]?\s*([\d.,]+)(?:\s*(USDC|USD|EUR|TL|TRY|₺))?/i);
-            if (dueMatch) {
-                amount = normalizeTurkishAmount(dueMatch[1]);
-                currency = (dueMatch[2] || inferDefaultCurrency()).toUpperCase();
-                if (currency === "₺" || currency === "TL") currency = "TRY";
-            }
-        }
-
-        // Last resort: any dollar amount
-        if (!amount) {
-            const dollarMatch = text.match(/\$\s*(\d{1,3}(?:[,]\d{3})*(?:\.\d{1,2})?)/);
-            if (dollarMatch) {
-                amount = dollarMatch[1].replace(/,/g, "");
-                currency = "USD";
-            }
+        const amountCandidate = this.extractAmountCandidate(text);
+        if (amountCandidate) {
+            amount = amountCandidate.amount;
+            currency = amountCandidate.currency;
         }
 
         // Invoice number — EN + TR
@@ -352,7 +344,7 @@ export class InvoiceEngine {
 
         if (!detectedAmount && !extracted.vendor) {
             this.bot.sendMessage(chatId,
-                "❌ Could not extract payment information from this document.\n\n" +
+                "❌ I couldn't extract payment details from this document.\n\n" +
                 "Make sure the invoice contains:\n" +
                 "• A total/amount (e.g. \"Total: $50.00 USDC\")\n" +
                 "• A vendor/company name\n\n" +
@@ -368,7 +360,7 @@ export class InvoiceEngine {
         if (!detectedAmount) {
             this.bot.sendMessage(chatId,
                 `📄 Found vendor: *${extracted.vendor}*\n\n` +
-                "But I couldn't detect the payment amount. " +
+                "But I couldn't detect the amount. " +
                 "Please send the payment manually:\n" +
                 "`send <amount> usdc <recipient>`", { parse_mode: "Markdown" }
             );
@@ -381,7 +373,7 @@ export class InvoiceEngine {
             message += `${this.buildInvoiceAmountLines(extracted).join("\n")}\n`;
             if (extracted.invoiceNumber) message += `Invoice #: ${extracted.invoiceNumber}\n`;
             if (extracted.date) message += `Date: ${extracted.date}\n`;
-            message += `\n⚠️ FX conversion is unavailable right now, so I won't prepare a payment automatically.`;
+            message += `\n⚠️ FX conversion is unavailable right now, so I won't prepare this payment automatically.`;
 
             this.bot.sendMessage(chatId, message, { parse_mode: "Markdown" });
             return;
