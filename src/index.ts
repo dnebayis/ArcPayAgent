@@ -27,6 +27,7 @@ import { SchedulerService } from "./services/scheduler";
 import { parseScheduleDate, formatScheduleTime } from "./utils/dateParser";
 import { MemoryStore } from "./ai/memoryStore";
 import { flushPersistence, getPersistenceBackend, initializePersistence } from "./storage/persistence";
+import { markBotReady, markPersistenceReady, markSchedulerReady } from "./appStatus";
 
 dotenv.config();
 
@@ -99,6 +100,7 @@ export async function main() {
     const maxScanBlocks = paymentHistoryChunkSize * paymentHistoryWindows;
 
     await initializePersistence();
+    markPersistenceReady();
     registerShutdownHandlers();
     console.log(`[Persistence] Using ${getPersistenceBackend()} backend`);
 
@@ -616,9 +618,11 @@ ${rows.join("\n")}`,
         paymentEngine, invoiceEngine, paymentRequestEngine,
         conversationMemory, scheduleStore
     );
+    markBotReady();
 
     if (shouldStartScheduler) {
         schedulerService.start();
+        markSchedulerReady();
     }
 
     console.log("Bot initialized!");

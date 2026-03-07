@@ -3,17 +3,23 @@ import { InvoiceStore } from "../storage/invoiceStore";
 import { VendorStore } from "../storage/vendorStore";
 import { RiskEngine, RiskResult } from "./riskEngine";
 import { MemoryStore } from "../ai/memoryStore";
+import { FxRateService } from "../services/fxRateService";
 
 export interface ExtractedInvoice {
     vendor: string | null;
     amount: string | null;
     currency: string | null;
+    detectedAmount?: string | null;
+    detectedCurrency?: string | null;
+    settlementAmount?: string | null;
+    settlementCurrency?: string | null;
     invoiceNumber: string | null;
     date: string | null;
 }
 
 export class InvoiceEngine {
     private riskEngine: RiskEngine;
+    private fxRateService: FxRateService;
 
     constructor(
         private bot: TelegramBot,
@@ -22,6 +28,7 @@ export class InvoiceEngine {
         private memoryStore?: MemoryStore
     ) {
         this.riskEngine = new RiskEngine(invoiceStore, vendorStore);
+        this.fxRateService = new FxRateService();
     }
 
     /**
@@ -38,10 +45,73 @@ export class InvoiceEngine {
 
         // Store raw text for risk analysis
         this._lastRawText = text;
-        return this.extractFields(text);
+        return await this.extractFields(text);
     }
 
     private _lastRawText = "";
+
+    private async buildSettlementFields(amount: string | null, currency: string | null): Promise<{
+        amount: string | null;
+        currency: string | null;
+        detectedAmount: string | null;
+        detectedCurrency: string | null;
+        settlementAmount: string | null;
+        settlementCurrency: string | null;
+    }> {
+        const normalizedDetectedCurrency = currency ? currency.toUpperCase() : null;
+        const detectedAmount = amount;
+        const settlementCurrency = "USDC";
+        let settlementAmount: string | null = null;
+
+        if (detectedAmount && normalizedDetectedCurrency) {
+            try {
+                settlementAmount = await this.fxRateService.convertToUsd(detectedAmount, normalizedDetectedCurrency);
+            } catch (error) {
+                console.error("[Invoice] FX conversion failed:", error);
+            }
+        }
+
+        return {
+            amount: settlementAmount,
+            currency: settlementCurrency,
+            detectedAmount,
+            detectedCurrency: normalizedDetectedCurrency,
+            settlementAmount,
+            settlementCurrency
+        };
+    }
+
+    private getDetectedAmount(extracted: ExtractedInvoice): string | null {
+        return extracted.detectedAmount || extracted.amount;
+    }
+
+    private getDetectedCurrency(extracted: ExtractedInvoice): string | null {
+        return extracted.detectedCurrency || extracted.currency;
+    }
+
+    private getSettlementAmount(extracted: ExtractedInvoice): string | null {
+        return extracted.settlementAmount || extracted.amount;
+    }
+
+    private getSettlementCurrency(extracted: ExtractedInvoice): string | null {
+        return extracted.settlementCurrency || extracted.currency || "USDC";
+    }
+
+    private buildInvoiceAmountLines(extracted: ExtractedInvoice): string[] {
+        const detectedAmount = this.getDetectedAmount(extracted);
+        const detectedCurrency = this.getDetectedCurrency(extracted) || "USD";
+        const settlementAmount = this.getSettlementAmount(extracted);
+        const settlementCurrency = this.getSettlementCurrency(extracted) || "USDC";
+
+        const lines = [`Detected: **${detectedAmount} ${detectedCurrency}**`];
+        if (settlementAmount) {
+            lines.push(`Settlement: **${settlementAmount} ${settlementCurrency}**`);
+        } else {
+            lines.push(`Settlement: **conversion required** (${settlementCurrency})`);
+        }
+
+        return lines;
+    }
 
     /**
      * Step 2a — Extract text from PDF using pdf-parse, with OCR fallback
@@ -87,11 +157,21 @@ export class InvoiceEngine {
     /**
      * Step 3 — Extract structured fields from raw text using regex
      */
-    extractFields(text: string): ExtractedInvoice {
+    async extractFields(text: string): Promise<ExtractedInvoice> {
         // Amount + Currency
         // Strategy: Find ALL potential amounts, prefer "amount paid"/"ödenecek tutar" > "total"/"toplam" > others
         let amount: string | null = null;
         let currency: string | null = null;
+        const upperText = text.toUpperCase();
+
+        const inferDefaultCurrency = (): string => {
+            if (/\bUSDC\b/i.test(text)) return "USDC";
+            if (/\bUSD\b/i.test(text) || /\$/.test(text) || /\bPAID ON\b/i.test(upperText)) return "USD";
+            if (/\bEURC\b/i.test(text)) return "EURC";
+            if (/\bEUR\b/i.test(text) || /€/.test(text)) return "EUR";
+            if (/\bTRY\b/i.test(text) || /\bTL\b/i.test(text) || /₺/.test(text)) return "TRY";
+            return "USD";
+        };
 
         // Helper: Turkish uses comma as decimal (1.234,56) — normalize to 1234.56
         const normalizeTurkishAmount = (raw: string): string => {
@@ -114,7 +194,7 @@ export class InvoiceEngine {
             const match = text.match(pattern);
             if (match) {
                 amount = normalizeTurkishAmount(match[1]);
-                currency = (match[2] || "TRY").toUpperCase();
+                currency = (match[2] || inferDefaultCurrency()).toUpperCase();
                 if (currency === "₺" || currency === "TL") currency = "TRY";
                 break;
             }
@@ -126,7 +206,7 @@ export class InvoiceEngine {
             let match;
             while ((match = totalPattern.exec(text)) !== null) {
                 amount = normalizeTurkishAmount(match[1]);
-                currency = (match[2] || "TRY").toUpperCase();
+                currency = (match[2] || inferDefaultCurrency()).toUpperCase();
                 if (currency === "₺" || currency === "TL") currency = "TRY";
             }
         }
@@ -163,7 +243,7 @@ export class InvoiceEngine {
             const dueMatch = text.match(/(?:due|balance|borç|bakiye)[:\s]*[₺$]?\s*([\d.,]+)(?:\s*(USDC|USD|EUR|TL|TRY|₺))?/i);
             if (dueMatch) {
                 amount = normalizeTurkishAmount(dueMatch[1]);
-                currency = (dueMatch[2] || "TRY").toUpperCase();
+                currency = (dueMatch[2] || inferDefaultCurrency()).toUpperCase();
                 if (currency === "₺" || currency === "TL") currency = "TRY";
             }
         }
@@ -255,14 +335,22 @@ export class InvoiceEngine {
             }
         }
 
-        return { vendor, amount, currency: "USDC", invoiceNumber, date };
+        return {
+            vendor,
+            invoiceNumber,
+            date,
+            ...(await this.buildSettlementFields(amount, currency))
+        };
     }
 
     /**
      * Step 4-7 — Process invoice with risk analysis
      */
     async processInvoice(chatId: number, extracted: ExtractedInvoice): Promise<void> {
-        if (!extracted.amount && !extracted.vendor) {
+        const detectedAmount = this.getDetectedAmount(extracted);
+        const detectedCurrency = this.getDetectedCurrency(extracted);
+
+        if (!detectedAmount && !extracted.vendor) {
             this.bot.sendMessage(chatId,
                 "❌ Could not extract payment information from this document.\n\n" +
                 "Make sure the invoice contains:\n" +
@@ -277,7 +365,7 @@ export class InvoiceEngine {
         if (!extracted.vendor) {
             extracted.vendor = "Unknown Vendor";
         }
-        if (!extracted.amount) {
+        if (!detectedAmount) {
             this.bot.sendMessage(chatId,
                 `📄 Found vendor: *${extracted.vendor}*\n\n` +
                 "But I couldn't detect the payment amount. " +
@@ -287,7 +375,17 @@ export class InvoiceEngine {
             return;
         }
 
-        const currency = extracted.currency || "USD";
+        if (!this.getSettlementAmount(extracted)) {
+            let message = `📄 Invoice detected.\n\n`;
+            message += `Vendor: **${extracted.vendor}**\n`;
+            message += `${this.buildInvoiceAmountLines(extracted).join("\n")}\n`;
+            if (extracted.invoiceNumber) message += `Invoice #: ${extracted.invoiceNumber}\n`;
+            if (extracted.date) message += `Date: ${extracted.date}\n`;
+            message += `\n⚠️ FX conversion is unavailable right now, so I won't prepare a payment automatically.`;
+
+            this.bot.sendMessage(chatId, message, { parse_mode: "Markdown" });
+            return;
+        }
 
         // ── Risk Analysis ──
         const risk = this.riskEngine.analyzeInvoiceRisk(chatId, extracted, this._lastRawText);
@@ -301,7 +399,7 @@ export class InvoiceEngine {
             // Block payment — show risk details
             let message = `📄 Invoice detected.\n\n`;
             message += `Vendor: **${extracted.vendor}**\n`;
-            message += `Amount: **${extracted.amount} ${currency}**\n`;
+            message += `${this.buildInvoiceAmountLines(extracted).join("\n")}\n`;
             if (extracted.invoiceNumber) message += `Invoice #: ${extracted.invoiceNumber}\n`;
             message += RiskEngine.formatRiskMessage(risk);
             message += `\n\n🚫 Payment blocked due to high risk.`;
@@ -330,7 +428,7 @@ export class InvoiceEngine {
 
             let message = `📄 Invoice detected.\n\n`;
             message += `Vendor: **${extracted.vendor}**${vendorResolved}\n`;
-            message += `Amount: **${extracted.amount} ${currency}**\n`;
+            message += `${this.buildInvoiceAmountLines(extracted).join("\n")}\n`;
             if (extracted.invoiceNumber) message += `Invoice #: ${extracted.invoiceNumber}\n`;
             if (extracted.date) message += `Date: ${extracted.date}\n`;
             message += RiskEngine.formatRiskMessage(risk);
@@ -357,7 +455,6 @@ export class InvoiceEngine {
      * Step 5 — Display extraction results and offer payment buttons
      */
     async suggestPayment(chatId: number, extracted: ExtractedInvoice): Promise<void> {
-        const currency = extracted.currency || "USD";
         let vendorResolved = "";
 
         if (extracted.vendor) {
@@ -371,7 +468,7 @@ export class InvoiceEngine {
 
         let message = `📄 Invoice detected.\n\n`;
         message += `Vendor: **${extracted.vendor}**${vendorResolved}\n`;
-        message += `Amount: **${extracted.amount} ${currency}**\n`;
+        message += `${this.buildInvoiceAmountLines(extracted).join("\n")}\n`;
         if (extracted.invoiceNumber) message += `Invoice #: ${extracted.invoiceNumber}\n`;
         if (extracted.date) message += `Date: ${extracted.date}\n`;
         message += `\n✅ Risk check passed`;
@@ -410,14 +507,20 @@ export class InvoiceEngine {
      * Step 7 — Store the invoice
      */
     storeInvoice(chatId: number, extracted: ExtractedInvoice): string {
-        if (this.memoryStore && extracted.vendor && extracted.amount) {
-            this.memoryStore.recordInvoice(chatId, extracted.vendor, parseFloat(extracted.amount));
+        const settlementAmount = this.getSettlementAmount(extracted);
+
+        if (this.memoryStore && extracted.vendor && settlementAmount) {
+            this.memoryStore.recordInvoice(chatId, extracted.vendor, parseFloat(settlementAmount));
         }
 
         return this.invoiceStore.saveInvoice(chatId, {
             vendor: extracted.vendor || "Unknown",
-            amount: extracted.amount || "0",
-            currency: extracted.currency || "USD",
+            amount: settlementAmount || "0",
+            currency: this.getSettlementCurrency(extracted) || "USDC",
+            detectedAmount: this.getDetectedAmount(extracted),
+            detectedCurrency: this.getDetectedCurrency(extracted),
+            settlementAmount,
+            settlementCurrency: this.getSettlementCurrency(extracted),
             invoiceNumber: extracted.invoiceNumber,
             date: extracted.date,
         });

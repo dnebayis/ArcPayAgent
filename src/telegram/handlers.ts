@@ -45,6 +45,10 @@ export function setupHandlers(
                             vendor: extracted.vendor,
                             amount: extracted.amount,
                             currency: extracted.currency,
+                            detectedAmount: extracted.detectedAmount,
+                            detectedCurrency: extracted.detectedCurrency,
+                            settlementAmount: extracted.settlementAmount,
+                            settlementCurrency: extracted.settlementCurrency,
                             invoiceNumber: extracted.invoiceNumber
                         });
                     }
@@ -73,6 +77,10 @@ export function setupHandlers(
                         vendor: extracted.vendor,
                         amount: extracted.amount,
                         currency: extracted.currency,
+                        detectedAmount: extracted.detectedAmount,
+                        detectedCurrency: extracted.detectedCurrency,
+                        settlementAmount: extracted.settlementAmount,
+                        settlementCurrency: extracted.settlementCurrency,
                         invoiceNumber: extracted.invoiceNumber
                     });
                 }
@@ -294,12 +302,16 @@ _Tip: You can use natural language too; examples: “send 10 usdc to jack”, �
 
             // Fall back to conversation memory if pending invoice was lost (e.g. bot restart)
             if ((!pending || !pending.amount) && conversationMemory) {
-                    const lastInv = conversationMemory.getContext(ownerChatId).lastInvoice;
+                const lastInv = conversationMemory.getContext(ownerChatId).lastInvoice;
                 if (lastInv && lastInv.amount) {
                     pending = {
                         vendor: lastInv.vendor,
                         amount: lastInv.amount,
                         currency: lastInv.currency,
+                        detectedAmount: lastInv.detectedAmount,
+                        detectedCurrency: lastInv.detectedCurrency,
+                        settlementAmount: lastInv.settlementAmount,
+                        settlementCurrency: lastInv.settlementCurrency,
                         invoiceNumber: lastInv.invoiceNumber || null,
                         date: null
                     };

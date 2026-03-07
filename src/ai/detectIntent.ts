@@ -39,6 +39,17 @@ export function detectIntent(text: string): DetectedIntent | null {
         };
     }
 
+    const explicitScheduleCandidatePattern = /^schedule\s+payment\s+(\d+(?:\.\d+)?)\s+usdc\s+(?:to\s+)?(0[xX][a-fA-F0-9]{40}|[a-zA-Z0-9_]+)\s+(.+)$/i;
+    const explicitScheduleCandidateMatch = text.match(explicitScheduleCandidatePattern);
+    if (explicitScheduleCandidateMatch) {
+        return {
+            action: "schedule_payment",
+            amount: parseFloat(explicitScheduleCandidateMatch[1]),
+            beneficiary: explicitScheduleCandidateMatch[2],
+            schedule_time: explicitScheduleCandidateMatch[3]
+        };
+    }
+
     const scheduledPaymentPattern = new RegExp(
         `^(?:send|pay|transfer)\\s+(\\d+(?:\\.\\d+)?)\\s+usdc\\s+(?:to\\s+)?(0[xX][a-fA-F0-9]{40}|[a-zA-Z0-9_]+)\\s+${TIME_EXPRESSION}$`,
         "i"
@@ -53,7 +64,18 @@ export function detectIntent(text: string): DetectedIntent | null {
         };
     }
 
-    const sendPattern1 = /^send\s+(\d+(?:\.\d+)?)\s+usdc\s+(?:to\s+)?([a-zA-Z0-9_x]+)/i;
+    const scheduledPaymentCandidatePattern = /^(?:send|pay|transfer)\s+(\d+(?:\.\d+)?)\s+usdc\s+(?:to\s+)?(0[xX][a-fA-F0-9]{40}|[a-zA-Z0-9_]+)\s+((?:after|in)\s+.+)$/i;
+    const scheduledPaymentCandidateMatch = text.match(scheduledPaymentCandidatePattern);
+    if (scheduledPaymentCandidateMatch) {
+        return {
+            action: "schedule_payment",
+            amount: parseFloat(scheduledPaymentCandidateMatch[1]),
+            beneficiary: scheduledPaymentCandidateMatch[2],
+            schedule_time: scheduledPaymentCandidateMatch[3]
+        };
+    }
+
+    const sendPattern1 = /^send\s+(\d+(?:\.\d+)?)\s+usdc\s+(?:to\s+)?([a-zA-Z0-9_x]+)$/i;
     const send1Match = text.match(sendPattern1);
     if (send1Match) {
         return { action: "create_payment", amount: parseFloat(send1Match[1]), beneficiary: send1Match[2] };
@@ -65,13 +87,13 @@ export function detectIntent(text: string): DetectedIntent | null {
         return { action: "create_payment", amount: parseFloat(send2Match[2]), beneficiary: send2Match[1] };
     }
 
-    const payPattern = /^pay\s+(\d+(?:\.\d+)?)\s+usdc\s+(?:to\s+)?([a-zA-Z0-9_x]+)/i;
+    const payPattern = /^pay\s+(\d+(?:\.\d+)?)\s+usdc\s+(?:to\s+)?([a-zA-Z0-9_x]+)$/i;
     const payMatch = text.match(payPattern);
     if (payMatch) {
         return { action: "create_payment", amount: parseFloat(payMatch[1]), beneficiary: payMatch[2] };
     }
 
-    const transferPattern = /^transfer\s+(\d+(?:\.\d+)?)\s+usdc\s+(?:to\s+)?([a-zA-Z0-9_x]+)/i;
+    const transferPattern = /^transfer\s+(\d+(?:\.\d+)?)\s+usdc\s+(?:to\s+)?([a-zA-Z0-9_x]+)$/i;
     const transferMatch = text.match(transferPattern);
     if (transferMatch) {
         return { action: "create_payment", amount: parseFloat(transferMatch[1]), beneficiary: transferMatch[2] };

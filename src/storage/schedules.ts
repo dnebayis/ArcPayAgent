@@ -14,6 +14,9 @@ export interface Schedule {
     frequency: ScheduleFrequency;
     active: boolean;
     createdAt: number;
+    awaitingAction?: boolean;
+    notificationSentAt?: number | null;
+    lastExecutionAt?: number | null;
 }
 
 export interface UserSchedules {
@@ -52,7 +55,10 @@ export class ScheduleStore {
             nextExecution,
             frequency,
             active: true,
-            createdAt: Date.now()
+            createdAt: Date.now(),
+            awaitingAction: false,
+            notificationSentAt: null,
+            lastExecutionAt: null
         };
 
         this.store[id].schedules.push(schedule);
@@ -80,6 +86,9 @@ export class ScheduleStore {
         for (const [chatIdStr, userData] of Object.entries(this.store)) {
             for (const schedule of userData.schedules) {
                 if (schedule.active && schedule.nextExecution <= now) {
+                    if (schedule.awaitingAction) {
+                        continue;
+                    }
                     due.push({ chatId: parseInt(chatIdStr), schedule });
                 }
             }
@@ -106,19 +115,19 @@ export class ScheduleStore {
             schedule.nextExecution = next.getTime();
         }
 
+        schedule.awaitingAction = false;
+        schedule.notificationSentAt = null;
+        schedule.lastExecutionAt = Date.now();
+
         this.persist();
     }
 
-    /**
-     * Temporarily push nextExecution forward to prevent re-notification.
-     * Called by scheduler after sending notification.
-     */
-    snooze(chatId: number, scheduleId: string): void {
+    markNotified(chatId: number, scheduleId: string): void {
         const id = chatId.toString();
         const schedule = this.store[id]?.schedules?.find(s => s.id === scheduleId);
         if (!schedule) return;
-        // Push 10 minutes into future to avoid re-triggering while waiting for user
-        schedule.nextExecution = Date.now() + 10 * 60 * 1000;
+        schedule.awaitingAction = true;
+        schedule.notificationSentAt = Date.now();
         this.persist();
     }
 
@@ -127,6 +136,8 @@ export class ScheduleStore {
         const schedule = this.store[id]?.schedules?.find(s => s.id === scheduleId && s.active);
         if (!schedule) return false;
         schedule.active = false;
+        schedule.awaitingAction = false;
+        schedule.notificationSentAt = null;
         this.persist();
         return true;
     }

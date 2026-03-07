@@ -9,6 +9,10 @@ export interface ConversationContext {
         vendor: string | null;
         amount: string | null;
         currency: string | null;
+        detectedAmount?: string | null;
+        detectedCurrency?: string | null;
+        settlementAmount?: string | null;
+        settlementCurrency?: string | null;
         invoiceNumber: string | null;
     };
     /** Last payment that was prepared or sent */
@@ -101,7 +105,13 @@ export class ConversationMemory {
         parts.push(`[Current date/time: ${dateStr}]`);
 
         if (ctx.lastInvoice) {
-            parts.push(`[Last analyzed invoice: vendor="${ctx.lastInvoice.vendor}", amount="${ctx.lastInvoice.amount} ${ctx.lastInvoice.currency}", invoiceNumber="${ctx.lastInvoice.invoiceNumber}"]`);
+            const detected = ctx.lastInvoice.detectedAmount && ctx.lastInvoice.detectedCurrency
+                ? `${ctx.lastInvoice.detectedAmount} ${ctx.lastInvoice.detectedCurrency}`
+                : `${ctx.lastInvoice.amount} ${ctx.lastInvoice.currency}`;
+            const settlement = ctx.lastInvoice.settlementAmount && ctx.lastInvoice.settlementCurrency
+                ? `${ctx.lastInvoice.settlementAmount} ${ctx.lastInvoice.settlementCurrency}`
+                : `${ctx.lastInvoice.amount} ${ctx.lastInvoice.currency}`;
+            parts.push(`[Last analyzed invoice: vendor="${ctx.lastInvoice.vendor}", detected="${detected}", settlement="${settlement}", invoiceNumber="${ctx.lastInvoice.invoiceNumber}"]`);
         }
         if (ctx.lastPayment) {
             parts.push(`[Last payment: ${ctx.lastPayment.amount} USDC to ${ctx.lastPayment.beneficiary}]`);

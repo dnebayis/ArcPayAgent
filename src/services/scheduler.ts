@@ -12,7 +12,7 @@ export class SchedulerService {
     ) { }
 
     /**
-     * Start the scheduler — checks every 60 seconds for due payments
+     * Start the scheduler — checks every 10 seconds for due payments
      */
     start(): void {
         console.log("[Scheduler] Started — checking every 10s");
@@ -61,9 +61,7 @@ export class SchedulerService {
                 }
             );
 
-            // Push nextExecution forward to prevent re-notification next tick
-            // Actual deactivation happens when user clicks a button
-            this.scheduleStore.snooze(chatId, schedule.id);
+            this.scheduleStore.markNotified(chatId, schedule.id);
         }
     }
 }

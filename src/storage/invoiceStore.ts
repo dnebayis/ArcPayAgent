@@ -7,6 +7,10 @@ export interface InvoiceRecord {
     vendor: string;
     amount: string;
     currency: string;
+    detectedAmount?: string | null;
+    detectedCurrency?: string | null;
+    settlementAmount?: string | null;
+    settlementCurrency?: string | null;
     invoiceNumber: string | null;
     date: string | null;
     paid: boolean;
@@ -54,7 +58,8 @@ export class InvoiceStore {
         const id = chatId.toString();
         this.ensureUser(id);
 
-        const key = this.buildDuplicateKey(invoice.vendor, invoice.invoiceNumber, invoice.amount, invoice.date);
+        const duplicateAmount = invoice.detectedAmount || invoice.amount;
+        const key = this.buildDuplicateKey(invoice.vendor, invoice.invoiceNumber, duplicateAmount, invoice.date);
         const invoiceId = crypto.randomUUID();
 
         this.store[id].invoices[invoiceId] = {
