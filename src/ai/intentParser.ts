@@ -2,7 +2,11 @@ import { LLMKeyStore } from "../storage/llmKeyStore";
 import { ConversationMemory } from "../agent/conversationMemory";
 import { SessionStore } from "../agent/sessionStore";
 import { MemoryStore } from "./memoryStore";
+import { buildDecision } from "./decisionEngine";
+import { resolveSlots } from "./resolveSlots";
 import { SYSTEM_PROMPT } from "./systemPrompt";
+import { validateIntent } from "./validateIntent";
+import { parseScheduleDate } from "../utils/dateParser";
 
 export interface ParsedIntent {
     action: string;
@@ -10,11 +14,15 @@ export interface ParsedIntent {
     beneficiary?: string;
     name?: string;
     address?: string;
+    schedule_time?: string;
+    frequency?: string;
     message?: string;
     input?: string;
     confidence?: number;
     plan?: string[];
     rationale?: string;
+    safeToExecute?: boolean;
+    needsClarification?: boolean;
 }
 
 export class IntentParser {
@@ -26,27 +34,55 @@ export class IntentParser {
     ) { }
 
     async parse(chatId: number, input: string): Promise<ParsedIntent> {
-        const text = input.trim();
+        const rawText = input.trim();
+        const decision = buildDecision(rawText);
+        const text = decision.normalizedText;
         const logIntent = (intent: ParsedIntent) => {
             if (process.env.LOG_INTENT) {
                 const conf = intent.confidence !== undefined ? intent.confidence : "n/a";
-                console.log(`[intent] chatId=${chatId} action=${intent.action} confidence=${conf} text="${text}"`);
+                console.log(`[intent] chatId=${chatId} action=${intent.action} confidence=${conf} text="${rawText}"`);
             }
         };
+        const finalizeIntent = (baseIntent: ParsedIntent, confidence: number): ParsedIntent => {
+            const resolvedIntent = resolveSlots({
+                chatId,
+                intent: baseIntent,
+                conversationMemory: this.memory,
+                sessionStore: this.sessionStore,
+                memoryStore: this.memoryStore
+            }) as ParsedIntent;
+            const validation = validateIntent(resolvedIntent);
 
-        // ── Layer 1: Regex parser (precise, structured commands — always first) ──
-        const regexResult = this.regexParse(text);
-        if (regexResult) {
-            const intent = { ...regexResult, confidence: 0.9, plan: this.buildPlan(regexResult) };
+            return {
+                ...resolvedIntent,
+                confidence,
+                plan: this.buildPlan(resolvedIntent),
+                safeToExecute: validation.safeToExecute,
+                needsClarification: validation.needsClarification,
+                message: validation.message || resolvedIntent.message
+            };
+        };
+
+        // ── Layer 1: Deterministic decision engine ──
+        if (decision.detectedIntent) {
+            const intent = finalizeIntent(decision.detectedIntent as ParsedIntent, 0.92);
             logIntent(intent);
             return intent;
         }
 
-        // ── Layer 2: Context-aware follow-ups ──
+        // ── Layer 2: Regex parser fallback ──
+        const regexResult = this.regexParse(text);
+        if (regexResult) {
+            const intent = finalizeIntent(regexResult, 0.9);
+            logIntent(intent);
+            return intent;
+        }
+
+        // ── Layer 3: Context-aware follow-ups ──
         if (this.sessionStore) {
             const sessionFollowUp = this.resolveSessionFollowUp(chatId, text);
             if (sessionFollowUp) {
-                const intent = { ...sessionFollowUp, confidence: 0.75, plan: this.buildPlan(sessionFollowUp) };
+                const intent = finalizeIntent(sessionFollowUp, 0.75);
                 logIntent(intent);
                 return intent;
             }
@@ -55,32 +91,32 @@ export class IntentParser {
         if (this.memory) {
             const followUp = this.resolveFollowUp(chatId, text);
             if (followUp) {
-                const intent = { ...followUp, confidence: 0.7, plan: this.buildPlan(followUp) };
+                const intent = finalizeIntent(followUp, 0.7);
                 logIntent(intent);
                 return intent;
             }
         }
 
-        // ── Layer 3: Heuristics ──
+        // ── Layer 4: Heuristics ──
         const heuristicResult = this.heuristicParse(chatId, text);
         if (heuristicResult) {
-            const intent = { ...heuristicResult, confidence: 0.6, plan: this.buildPlan(heuristicResult) };
+            const intent = finalizeIntent(heuristicResult, 0.6);
             logIntent(intent);
             return intent;
         }
 
-        // ── Layer 4: LLM fallback (only if key exists) ──
+        // ── Layer 5: LLM fallback (only if key exists) ──
         const hasLLM = this.llmKeyStore && this.llmKeyStore.hasKey(chatId);
         if (hasLLM) {
             const llmIntent = await this.llmFallback(chatId, text);
-            const intent = { ...llmIntent, confidence: llmIntent.confidence ?? 0.5, plan: this.buildPlan(llmIntent) };
+            const intent = finalizeIntent(llmIntent, llmIntent.confidence ?? 0.5);
             logIntent(intent);
             return intent;
         }
 
         // ── Final smart fallback ──
         const fallback = this.buildSmartFallback(chatId, text);
-        const intent = { ...fallback, confidence: 0.4, plan: this.buildPlan(fallback) };
+        const intent = finalizeIntent(fallback, 0.4);
         logIntent(intent);
         return intent;
     }
@@ -89,17 +125,57 @@ export class IntentParser {
      * Layer 1 — Regex-based intent detection
      */
     private regexParse(text: string): ParsedIntent | null {
+        const timeExpression = '((?:(?:after|in)\\s+)?\\d+\\s*(?:second|seconds|minute|minutes|hour|hours|day|days|week|weeks)|tomorrow|today|next\\s+(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday))';
+
+        const arcScanLinkPattern = /^(?=.*(?:arc\s*scan|arcscan|block\s+explorer|explorer))(?=.*(?:link|url|site|website|open|send|give)).*$/i;
+        if (arcScanLinkPattern.test(text)) {
+            return {
+                action: "chat",
+                message: "ArcScan testnet explorer: https://testnet.arcscan.app/"
+            };
+        }
+
         // wallet balance (short form) — prioritize before generic wallet/status
         const walletBalancePattern = /^wallet\s+balance$/i;
         if (walletBalancePattern.test(text)) return { action: "wallet_intelligence" };
+
+        // schedule payment 1 usdc to jack 10 seconds
+        const explicitSchedulePattern = new RegExp(
+            `^schedule\\s+payment\\s+(\\d+(?:\\.\\d+)?)\\s+usdc\\s+(?:to\\s+)?(0[xX][a-fA-F0-9]{40}|[a-zA-Z0-9_]+)\\s+${timeExpression}$`,
+            "i"
+        );
+        const explicitScheduleMatch = text.match(explicitSchedulePattern);
+        if (explicitScheduleMatch) {
+            return {
+                action: "schedule_payment",
+                amount: parseFloat(explicitScheduleMatch[1]),
+                beneficiary: explicitScheduleMatch[2],
+                schedule_time: explicitScheduleMatch[3]
+            };
+        }
+
+        // schedule payment: send/pay/transfer 1 usdc to jack after 10 seconds
+        const scheduledPaymentPattern = new RegExp(
+            `^(?:send|pay|transfer)\\s+(\\d+(?:\\.\\d+)?)\\s+usdc\\s+(?:to\\s+)?(0[xX][a-fA-F0-9]{40}|[a-zA-Z0-9_]+)\\s+${timeExpression}$`,
+            "i"
+        );
+        const scheduledMatch = text.match(scheduledPaymentPattern);
+        if (scheduledMatch) {
+            return {
+                action: "schedule_payment",
+                amount: parseFloat(scheduledMatch[1]),
+                beneficiary: scheduledMatch[2],
+                schedule_time: scheduledMatch[3]
+            };
+        }
 
         // send 1 usdc jack | send 5 usdc to 0xabc
         const sendPattern1 = /^send\s+(\d+(?:\.\d+)?)\s+usdc\s+(?:to\s+)?([a-zA-Z0-9_x]+)/i;
         const m1 = text.match(sendPattern1);
         if (m1) return { action: "create_payment", amount: parseFloat(m1[1]), beneficiary: m1[2] };
 
-        // 0xabc send 1 usdc
-        const sendPattern2 = /^([a-zA-Z0-9_x]+)\s+send\s+(\d+(?:\.\d+)?)\s+usdc/i;
+        // 0xabc... send 1 usdc
+        const sendPattern2 = /^(0[xX][a-fA-F0-9]{40})\s+send\s+(\d+(?:\.\d+)?)\s+usdc$/i;
         const m2 = text.match(sendPattern2);
         if (m2) return { action: "create_payment", amount: parseFloat(m2[2]), beneficiary: m2[1] };
 
@@ -280,6 +356,59 @@ export class IntentParser {
             const cancelMatch = /^(?:cancel|abort|stop|nevermind)(?:\s+(?:that|it|the\s+payment|that\s+payment))?$/i;
             if (cancelMatch.test(lower)) {
                 return { action: "cancel_payment" };
+            }
+        }
+
+        if (session.pendingAction === "collect_intent_details" && session.pendingIntent) {
+            const pendingIntent = session.pendingIntent;
+            const amountOnlyMatch = lower.match(/^(\d+(?:\.\d+)?)\s*(?:usdc)?$/i);
+
+            if (pendingIntent.action === "create_payment") {
+                if (amountOnlyMatch && pendingIntent.beneficiary) {
+                    const newAmount = parseFloat(amountOnlyMatch[1]);
+                    return {
+                        action: "create_payment",
+                        amount: newAmount,
+                        beneficiary: pendingIntent.beneficiary
+                    };
+                }
+
+                if ((ethersLikeAddress(lower) || /^[a-zA-Z0-9_]+$/i.test(lower)) && pendingIntent.amount !== undefined) {
+                    return {
+                        action: "create_payment",
+                        amount: pendingIntent.amount,
+                        beneficiary: lower
+                    };
+                }
+            }
+
+            if (pendingIntent.action === "schedule_payment") {
+                if (parseScheduleDate(lower) && pendingIntent.amount !== undefined && pendingIntent.beneficiary) {
+                    return {
+                        action: "schedule_payment",
+                        amount: pendingIntent.amount,
+                        beneficiary: pendingIntent.beneficiary,
+                        schedule_time: lower
+                    };
+                }
+
+                if (amountOnlyMatch && pendingIntent.beneficiary && pendingIntent.schedule_time) {
+                    return {
+                        action: "schedule_payment",
+                        amount: parseFloat(amountOnlyMatch[1]),
+                        beneficiary: pendingIntent.beneficiary,
+                        schedule_time: pendingIntent.schedule_time
+                    };
+                }
+
+                if ((ethersLikeAddress(lower) || /^[a-zA-Z0-9_]+$/i.test(lower)) && pendingIntent.amount !== undefined && pendingIntent.schedule_time) {
+                    return {
+                        action: "schedule_payment",
+                        amount: pendingIntent.amount,
+                        beneficiary: lower,
+                        schedule_time: pendingIntent.schedule_time
+                    };
+                }
             }
         }
 
@@ -715,4 +844,8 @@ Type /help for the full command list!`;
                 return ["Gather details", "Execute requested action"];
         }
     }
+}
+
+function ethersLikeAddress(value: string): boolean {
+    return /^0[xX][a-fA-F0-9]{40}$/.test(value);
 }

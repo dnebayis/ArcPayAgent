@@ -75,7 +75,11 @@ export async function main() {
     const circleWalletSetId = process.env.CIRCLE_WALLET_SET_ID || "";
     const circleApiUrl = process.env.CIRCLE_API_URL || "https://api.circle.com/v1/w3s";
 
-    const llmSecret = process.env.LLM_KEY_SECRET || "llm-unsafe-secret";
+    const llmSecret = process.env.LLM_KEY_SECRET || "";
+
+    if (!isTest && !llmSecret) {
+        throw new Error("Missing LLM_KEY_SECRET. Refusing to start with an unsafe fallback secret.");
+    }
 
     const providerUrl = process.env.ARC_RPC_URL || "https://testnet.arcscan.app/rpc";
     const usdcAddress = process.env.USDC_ADDRESS || "0x0000000000000000000000000000000000000000";
@@ -510,8 +514,17 @@ ${rows.join("\n")}`,
             return;
         }
 
-        const vendorAddress = vendorStore.getVendor(chatId, intent.beneficiary);
-        if (!vendorAddress) {
+        const beneficiaryInput = intent.beneficiary;
+        if (beneficiaryInput.startsWith("0x") && !ethers.isAddress(beneficiaryInput)) {
+            bot.sendMessage(chatId, "That wallet address looks invalid. Please send a full valid 0x address.");
+            return;
+        }
+
+        const isDirectAddress = ethers.isAddress(beneficiaryInput);
+        const scheduleAddress = isDirectAddress ? beneficiaryInput : vendorStore.getVendor(chatId, beneficiaryInput);
+        const scheduleLabel = beneficiaryInput;
+
+        if (!scheduleAddress) {
             bot.sendMessage(chatId, `❌ Vendor "${intent.beneficiary}" not found. Save it first.`);
             return;
         }
@@ -557,7 +570,7 @@ ${rows.join("\n")}`,
         console.log(`[Schedule] chatId=${chatId} time="${timeStr}" parsed=${new Date(scheduleTime).toLocaleString()} freq=${frequency}`);
 
         const schedule = scheduleStore.createSchedule(
-            chatId, intent.beneficiary, vendorAddress,
+            chatId, scheduleLabel, scheduleAddress,
             intent.amount, scheduleTime, frequency
         );
 
@@ -595,7 +608,7 @@ ${rows.join("\n")}`,
         }
     });
 
-    const toolRouter = new ToolRouter(bot, registry);
+    const toolRouter = new ToolRouter(bot, registry, sessionStore);
 
     setupHandlers(
         bot, walletStore, vendorStore, llmKeyStore,

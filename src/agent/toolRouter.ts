@@ -1,11 +1,13 @@
 import TelegramBot from "node-telegram-bot-api";
 import { ParsedIntent } from "../ai/intentParser";
 import { ToolRegistry } from "./toolRegistry";
+import { SessionStore } from "./sessionStore";
 
 export class ToolRouter {
     constructor(
         private bot: TelegramBot,
-        private registry: ToolRegistry
+        private registry: ToolRegistry,
+        private sessionStore?: SessionStore
     ) { }
 
     /**
@@ -13,6 +15,20 @@ export class ToolRouter {
      * The LLM never executes — only the engine does
      */
     async routeIntent(chatId: number, intent: ParsedIntent): Promise<boolean> {
+        if (intent.needsClarification || intent.safeToExecute === false) {
+            if (this.sessionStore && (intent.action === "create_payment" || intent.action === "schedule_payment")) {
+                this.sessionStore.setPendingIntent(chatId, {
+                    action: intent.action,
+                    amount: intent.amount,
+                    beneficiary: intent.beneficiary,
+                    schedule_time: intent.schedule_time
+                });
+            }
+            const ask = intent.message || "Please clarify what you want me to do.";
+            this.bot.sendMessage(chatId, ask);
+            return false;
+        }
+
         const tool = this.registry.get(intent.action);
 
         if (!tool) {
@@ -29,6 +45,9 @@ export class ToolRouter {
 
         try {
             await tool.handler(chatId, intent);
+            if (this.sessionStore) {
+                this.sessionStore.clearPendingIntent(chatId);
+            }
             return true;
         } catch (error: any) {
             this.bot.sendMessage(chatId, `❌ Error executing action: ${error.message}`);

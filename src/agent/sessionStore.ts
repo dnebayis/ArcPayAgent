@@ -3,6 +3,12 @@ export interface SessionState {
     recentMessages: { role: string; content: string }[];
     lastIntent?: string;
     pendingAction?: string;
+    pendingIntent?: {
+        action: string;
+        amount?: number;
+        beneficiary?: string;
+        schedule_time?: string;
+    };
     lastVendor?: string;
     lastAmount?: number;
     pendingPayment?: {
@@ -48,6 +54,7 @@ export class SessionStore {
         session.lastVendor = vendor || session.lastVendor;
         session.lastAmount = amount;
         session.pendingAction = 'confirm_payment';
+        delete session.pendingIntent;
     }
 
     updatePendingPayment(chatId: number, updates: { vendor?: string | null, amount?: number }) {
@@ -64,6 +71,27 @@ export class SessionStore {
         const session = this.ensure(chatId);
         delete session.pendingAction;
         delete session.pendingPayment;
+        delete session.pendingIntent;
+    }
+
+    setPendingIntent(chatId: number, intent: { action: string; amount?: number; beneficiary?: string; schedule_time?: string }) {
+        const session = this.ensure(chatId);
+        session.pendingIntent = { ...intent };
+        session.pendingAction = "collect_intent_details";
+        if (intent.beneficiary) {
+            session.lastVendor = intent.beneficiary;
+        }
+        if (intent.amount !== undefined) {
+            session.lastAmount = intent.amount;
+        }
+    }
+
+    clearPendingIntent(chatId: number) {
+        const session = this.ensure(chatId);
+        delete session.pendingIntent;
+        if (session.pendingAction === "collect_intent_details") {
+            delete session.pendingAction;
+        }
     }
 
     setLastIntent(chatId: number, intentAction: string) {

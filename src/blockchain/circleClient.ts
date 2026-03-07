@@ -1,6 +1,27 @@
 import crypto from "crypto";
 import { v4 as uuidv4 } from "uuid";
 
+export type CircleTransactionState =
+    | "INITIATED"
+    | "QUEUED"
+    | "CLEARED"
+    | "SENT"
+    | "STUCK"
+    | "CONFIRMED"
+    | "COMPLETE"
+    | "CANCELLED"
+    | "FAILED"
+    | "DENIED"
+    | "UNKNOWN";
+
+export interface CircleTransactionStatus {
+    id: string;
+    state: CircleTransactionState;
+    txHash: string | null;
+    errorReason: string | null;
+    errorDetails: string | null;
+}
+
 export class CircleClient {
     private baseUrl: string;
 
@@ -11,7 +32,11 @@ export class CircleClient {
         baseUrl?: string
     ) {
         if (!apiKey || !entitySecret || !walletSetId) {
-            console.warn("[CircleClient] Missing Circle credentials in Config. Ensure CIRCLE_API_KEY, CIRCLE_ENTITY_SECRET, and CIRCLE_WALLET_SET_ID are set.");
+            if (process.env.NODE_ENV === "test") {
+                console.warn("[CircleClient] Missing Circle credentials in test mode.");
+            } else {
+                throw new Error("Missing Circle credentials. Set CIRCLE_API_KEY, CIRCLE_ENTITY_SECRET, and CIRCLE_WALLET_SET_ID.");
+            }
         }
         this.baseUrl = baseUrl || "https://api.circle.com/v1/w3s";
     }
@@ -98,8 +123,50 @@ export class CircleClient {
         return res.id; // Usually returns transaction ID
     }
 
-    async getTransaction(id: string): Promise<any> {
-        return await this.request("GET", `/transactions/${id}`);
+    async getTransaction(id: string): Promise<CircleTransactionStatus> {
+        const data = await this.request("GET", `/transactions/${id}`);
+        const tx = data.transaction || data;
+
+        return {
+            id: tx.id || id,
+            state: (tx.state || "UNKNOWN") as CircleTransactionState,
+            txHash: tx.txHash || tx.transactionHash || tx.blockchainTxHash || null,
+            errorReason: tx.errorReason || null,
+            errorDetails: tx.errorDetails || null
+        };
+    }
+
+    async waitForTerminalTransaction(
+        id: string,
+        options: { attempts?: number; intervalMs?: number } = {}
+    ): Promise<CircleTransactionStatus | null> {
+        const attempts = options.attempts ?? 15;
+        const intervalMs = options.intervalMs ?? 2000;
+
+        for (let attempt = 0; attempt < attempts; attempt += 1) {
+            const tx = await this.getTransaction(id);
+            if (this.isTerminalState(tx.state)) {
+                return tx;
+            }
+
+            if (attempt < attempts - 1) {
+                await new Promise((resolve) => setTimeout(resolve, intervalMs));
+            }
+        }
+
+        return null;
+    }
+
+    isSuccessfulTerminalState(state: CircleTransactionState): boolean {
+        return state === "COMPLETE";
+    }
+
+    isFailedTerminalState(state: CircleTransactionState): boolean {
+        return state === "FAILED" || state === "DENIED" || state === "CANCELLED";
+    }
+
+    private isTerminalState(state: CircleTransactionState): boolean {
+        return this.isSuccessfulTerminalState(state) || this.isFailedTerminalState(state);
     }
 
     async getWalletBalance(walletId: string): Promise<any> {
@@ -110,4 +177,3 @@ export class CircleClient {
         return await this.request("GET", `/developer/transactions?walletIds=${walletId}&pageSize=50`);
     }
 }
-

@@ -26,6 +26,7 @@ ARC NETWORK KNOWLEDGE (Use this when users ask about Arc):
 - Key features include configurable privacy tooling for compliance and native integrations like CCTP for cross-chain liquidity.
 - Core use-cases include: Agentic Commerce, Onchain Credit with offchain trust, Capital Markets Settlement, Cross-border payments, and Onchain FX.
 - The ecosystem includes giants like Aave, AWS, BlackRock, Coinbase, Chainlink, Stripe, and Circle.
+- ArcScan testnet explorer URL is: https://testnet.arcscan.app/
 
 CRITICAL RULES FOR CONTEXT & VAGUE REQUESTS:
 1. You must respond with ONLY valid JSON — no extra text, no markdown, no explanation.
@@ -75,4 +76,3 @@ EXAMPLES:
 - "how much was that invoice?" → {"action": "chat", "message": "The last invoice I analyzed was from AWS for 50 USDC. Want me to prepare the payment?"}
 
 IMPORTANT: Output ONLY valid JSON. No text before or after the JSON.`;
-

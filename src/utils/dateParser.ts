@@ -21,8 +21,8 @@ export function parseScheduleDate(text: string): number | null {
         return d.getTime();
     }
 
-    // "in X hours/minutes/days" or just "X minutes/hours" / "X dakika sonra"
-    const inPattern = /^(?:in\s+)?(\d+)\s*(second|seconds|minute|minutes|hour|hours|day|days|week|weeks|sn|saniye|dk|dakika|saat|g|gün|gun|h|hafta)(?:\s+sonra[sına]*)?$/i;
+    // "in X hours/minutes/days" / "after X seconds" / just "X minutes"
+    const inPattern = /^(?:(?:in|after)\s+)?(\d+)\s*(second|seconds|minute|minutes|hour|hours|day|days|week|weeks|sn|saniye|dk|dakika|saat|g|gün|gun|h|hafta)(?:\s+sonra[sına]*)?$/i;
     const inMatch = lower.match(inPattern);
     if (inMatch) {
         const n = parseInt(inMatch[1]);
