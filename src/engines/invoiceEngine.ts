@@ -134,6 +134,10 @@ export class InvoiceEngine {
     }
 
     private buildNextStepLines(chatId: number, extracted: ExtractedInvoice, risk: RiskResult | null, canPreparePayment: boolean): string[] {
+        const settlementAmount = this.getSettlementAmount(extracted);
+        const settlementCurrency = this.getSettlementCurrency(extracted) || "USDC";
+        const vendorLabel = extracted.vendor || "this vendor";
+
         if (!this.getSettlementAmount(extracted)) {
             return [
                 "Next step:",
@@ -144,28 +148,30 @@ export class InvoiceEngine {
         if (!canPreparePayment && extracted.vendor) {
             return [
                 "Next step:",
-                `• Save this vendor first, then ask me to prepare the payment.`,
-                `• Example: save vendor "${extracted.vendor}" 0x...`
+                `• Save this vendor first: \`save vendor "${extracted.vendor}" 0x...\``,
+                `• Then say \`pay this invoice\` to continue with ${settlementAmount} ${settlementCurrency}.`
             ];
         }
 
         if (risk?.level === "REVIEW") {
             return [
                 "Next step:",
-                "• Review the flags below, then prepare the payment if everything looks right."
+                "• Review the flags below.",
+                `• If everything looks right, say \`pay this invoice\` or tap Prepare Payment to send ${settlementAmount} ${settlementCurrency} to ${vendorLabel}.`
             ];
         }
 
         if (risk?.level === "HIGH_RISK") {
             return [
                 "Next step:",
-                "• Review the risk flags carefully before overriding this payment."
+                "• Review the risk flags carefully.",
+                `• Only continue if you trust this invoice and want to send ${settlementAmount} ${settlementCurrency}.`
             ];
         }
 
         return [
             "Next step:",
-            "• Prepare the payment if the invoice details look correct."
+            `• Say \`pay this invoice\` or tap Prepare Payment to send ${settlementAmount} ${settlementCurrency} to ${vendorLabel}.`
         ];
     }
 
@@ -180,9 +186,9 @@ export class InvoiceEngine {
             return "Payment readiness: **Blocked until you review the risk flags**";
         }
         if (risk?.level === "REVIEW") {
-            return "Payment readiness: **Review recommended before payment**";
+            return "Payment readiness: **Ready after review**";
         }
-        return "Payment readiness: **Ready to prepare**";
+        return "Payment readiness: **Ready to pay**";
     }
 
     private normalizeAmountValue(raw: string): string {
