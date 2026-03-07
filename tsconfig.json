@@ -2,7 +2,7 @@
     "compilerOptions": {
         "target": "ES2022",
         "module": "CommonJS",
-        "rootDir": ".",
+        "rootDir": "./src",
         "outDir": "./dist",
         "esModuleInterop": true,
         "forceConsistentCasingInFileNames": true,
@@ -10,7 +10,6 @@
         "skipLibCheck": true
     },
     "include": [
-        "src/**/*",
-        "tests/**/*"
+        "src/**/*"
     ]
 }
