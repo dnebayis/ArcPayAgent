@@ -51,7 +51,7 @@ export class SchedulerService {
 
             this.bot.sendMessage(
                 chatId,
-                `⏰ **Scheduled payment ready**${freqLabel}\n\n${schedule.amount} USDC → **${schedule.vendor}**\nScheduled for: ${scheduledFor}`,
+                `⏰ **Scheduled payment due**${freqLabel}\n\nAmount: ${schedule.amount} USDC\nRecipient: **${schedule.vendor}**\nScheduled for: ${scheduledFor}\n\nChoose an action below.`,
                 {
                     parse_mode: "Markdown",
                     reply_markup: {

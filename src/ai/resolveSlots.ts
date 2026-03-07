@@ -20,15 +20,9 @@ export function resolveSlots(input: SlotResolutionInput): SlotResolutionInput["i
     const resolved = { ...input.intent };
 
     if (resolved.action === "create_payment") {
-        if (!resolved.beneficiary) {
-            const session = sessionStore?.getSession(chatId);
-            const ctx = conversationMemory?.getContext(chatId);
-            resolved.beneficiary =
-                session?.pendingPayment?.vendor ||
-                session?.lastVendor ||
-                ctx?.lastPayment?.beneficiary ||
-                resolved.beneficiary;
-        }
+        // Keep recipient resolution explicit.
+        // Follow-up flows are handled in resolveSessionFollowUp / resolveFollowUp.
+        // Avoid auto-filling the beneficiary from old session memory for inputs like "send 5".
     }
 
     if (resolved.action === "schedule_payment") {

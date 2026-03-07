@@ -368,7 +368,7 @@ export class InvoiceEngine {
         }
 
         if (!this.getSettlementAmount(extracted)) {
-            let message = `📄 Invoice detected.\n\n`;
+            let message = `📄 Invoice summary\n\n`;
             message += `Vendor: **${extracted.vendor}**\n`;
             message += `${this.buildInvoiceAmountLines(extracted).join("\n")}\n`;
             if (extracted.invoiceNumber) message += `Invoice #: ${extracted.invoiceNumber}\n`;
@@ -389,7 +389,7 @@ export class InvoiceEngine {
 
         if (risk.level === "HIGH_RISK") {
             // Block payment — show risk details
-            let message = `📄 Invoice detected.\n\n`;
+            let message = `📄 Invoice summary\n\n`;
             message += `Vendor: **${extracted.vendor}**\n`;
             message += `${this.buildInvoiceAmountLines(extracted).join("\n")}\n`;
             if (extracted.invoiceNumber) message += `Invoice #: ${extracted.invoiceNumber}\n`;
@@ -418,7 +418,7 @@ export class InvoiceEngine {
                 if (addr) vendorResolved = `\n→ Resolved: \`${addr}\``;
             }
 
-            let message = `📄 Invoice detected.\n\n`;
+            let message = `📄 Invoice summary\n\n`;
             message += `Vendor: **${extracted.vendor}**${vendorResolved}\n`;
             message += `${this.buildInvoiceAmountLines(extracted).join("\n")}\n`;
             if (extracted.invoiceNumber) message += `Invoice #: ${extracted.invoiceNumber}\n`;
@@ -458,7 +458,7 @@ export class InvoiceEngine {
 
         this._pendingInvoice[chatId.toString()] = extracted;
 
-        let message = `📄 Invoice detected.\n\n`;
+        let message = `📄 Invoice summary\n\n`;
         message += `Vendor: **${extracted.vendor}**${vendorResolved}\n`;
         message += `${this.buildInvoiceAmountLines(extracted).join("\n")}\n`;
         if (extracted.invoiceNumber) message += `Invoice #: ${extracted.invoiceNumber}\n`;

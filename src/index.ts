@@ -582,7 +582,7 @@ ${rows.join("\n")}`,
 
         bot.sendMessage(
             chatId,
-            `✅ **Payment scheduled**\n\n${schedule.amount} USDC → **${schedule.vendor}**\nExecution: ${formatUserDateTime(schedule.nextExecution, preferences)}\nFrequency: ${schedule.frequency}\nID: \`${schedule.id}\`\n\nI'll send you a reminder when it's due.`,
+            `✅ **Scheduled payment created**\n\nAmount: ${schedule.amount} USDC\nRecipient: **${schedule.vendor}**\nExecution: ${formatUserDateTime(schedule.nextExecution, preferences)}\nFrequency: ${schedule.frequency}\nID: \`${schedule.id}\`\n\nI’ll remind you when it’s due.`,
             { parse_mode: "Markdown" }
         );
     });
@@ -594,12 +594,12 @@ ${rows.join("\n")}`,
             return;
         }
 
-        let msg = "📅 **Scheduled Payments**\n\n";
+        let msg = "📅 **Scheduled payments**\n\n";
         const preferences = userPreferencesStore.getPreferences(chatId);
         for (const s of schedules) {
             msg += `• \`${s.id}\` — **${s.amount} USDC** → ${s.vendor} (${formatUserDateTime(s.nextExecution, preferences)}, ${s.frequency})\n`;
         }
-        msg += `\nUse \`cancel schedule <id>\` if you want to remove one.`;
+        msg += `\nUse \`cancel schedule <id>\` to remove one.`;
         bot.sendMessage(chatId, msg, { parse_mode: "Markdown" });
     });
 

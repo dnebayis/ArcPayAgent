@@ -108,7 +108,7 @@ export class PaymentEngine {
 
             this.bot.sendMessage(
                 chatId,
-                `⏳ **Payment submitted to Circle**\n\nAmount: ${payment.amountStr} USDC\nRecipient: \`${payment.beneficiary}\`\nCircle TxID: \`${txId}\`\nStatus: awaiting final confirmation.`,
+                `⏳ **Payment submitted**\n\nAmount: ${payment.amountStr} USDC\nRecipient: \`${payment.beneficiary}\`\nCircle TxID: \`${txId}\`\n\nCircle is processing the transaction. I’ll update you when it reaches a final status.`,
                 { parse_mode: "Markdown" }
             );
             this.clearPendingPayment(chatId);
@@ -122,7 +122,7 @@ export class PaymentEngine {
 
             this.bot.sendMessage(
                 chatId,
-                `✅ **Payment confirmed on Circle**\n\nAmount: ${payment.amountStr} USDC\nRecipient: \`${payment.beneficiary}\`\nCircle TxID: \`${txId}\``,
+                `✅ **Payment confirmed**\n\nAmount: ${payment.amountStr} USDC\nRecipient: \`${payment.beneficiary}\`\nCircle TxID: \`${txId}\``,
                 { parse_mode: "Markdown" }
             );
             this.finalizePayment(chatId, payment, txId);
@@ -141,7 +141,7 @@ export class PaymentEngine {
 
         this.bot.sendMessage(
             chatId,
-            `❌ **Payment failed on Circle**\n\nAmount: ${payment.amountStr} USDC\nRecipient: \`${payment.beneficiary}\`\nCircle TxID: \`${txId}\`\nReason: ${this.describeFailure(finalStatus)}`,
+            `❌ **Payment failed**\n\nAmount: ${payment.amountStr} USDC\nRecipient: \`${payment.beneficiary}\`\nCircle TxID: \`${txId}\`\nReason: ${this.describeFailure(finalStatus)}`,
             { parse_mode: "Markdown" }
         );
         this.clearPendingPayment(chatId);
@@ -404,7 +404,7 @@ export class PaymentEngine {
 
         const encodedPay = this.router.encodePay(payment.beneficiary, payment.amount, payment.memo || "");
         const txId = await this.circleClient.createTransaction(walletId, this.routerAddress, encodedPay);
-        this.bot.sendMessage(chatId, `⏳ **Payment submitted to Circle**\n\nAmount: ${payment.amountStr} USDC\nRecipient: \`${payment.beneficiary}\`\nCircle TxID: \`${txId}\`\nStatus: submitted, waiting for final confirmation.`, {
+        this.bot.sendMessage(chatId, `⏳ **Payment submitted**\n\nAmount: ${payment.amountStr} USDC\nRecipient: \`${payment.beneficiary}\`\nCircle TxID: \`${txId}\`\n\nCircle is processing the transaction. I’ll update you when it reaches a final status.`, {
             parse_mode: "Markdown"
         });
         await this.resolveSubmittedTransaction(chatId, payment, txId, "payment");
