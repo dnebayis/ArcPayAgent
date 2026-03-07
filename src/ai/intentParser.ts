@@ -103,11 +103,6 @@ export class IntentParser {
         const m2 = text.match(sendPattern2);
         if (m2) return { action: "create_payment", amount: parseFloat(m2[2]), beneficiary: m2[1] };
 
-        // send jack (no amount) → ask for amount, keep beneficiary
-        const sendNoAmount1 = /^(?:send|pay)\s+([a-zA-Z0-9_x]+)/i;
-        const mNoAmt1 = text.match(sendNoAmount1);
-        if (mNoAmt1) return { action: "create_payment", beneficiary: mNoAmt1[1] };
-
         // pay 10 usdc to jack
         const payPattern = /^pay\s+(\d+(?:\.\d+)?)\s+usdc\s+(?:to\s+)?([a-zA-Z0-9_x]+)/i;
         const mp = text.match(payPattern);
@@ -117,6 +112,11 @@ export class IntentParser {
         const transferPattern = /^transfer\s+(\d+(?:\.\d+)?)\s+usdc\s+(?:to\s+)?([a-zA-Z0-9_x]+)/i;
         const mt = text.match(transferPattern);
         if (mt) return { action: "create_payment", amount: parseFloat(mt[1]), beneficiary: mt[2] };
+
+        // send jack / pay jack (no amount) -> ask for amount, keep beneficiary
+        const sendNoAmount1 = /^(?:send|pay)\s+([a-zA-Z0-9_x]+)$/i;
+        const mNoAmt1 = text.match(sendNoAmount1);
+        if (mNoAmt1) return { action: "create_payment", beneficiary: mNoAmt1[1] };
 
         // save vendor jack 0xabc...
         const vendorPattern = /^(?:save|add)\s+vendor\s+([a-zA-Z0-9_]+)\s+(0[xX][a-fA-F0-9]{40})/i;

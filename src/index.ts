@@ -1,5 +1,6 @@
 import dotenv from "dotenv";
 import { ethers } from "ethers";
+import { startHealthServer } from "./http";
 import { createBot } from "./telegram/bot";
 import { setupHandlers } from "./telegram/handlers";
 import { WalletStore } from "./storage/walletStore";
@@ -28,8 +29,13 @@ import { MemoryStore } from "./ai/memoryStore";
 
 dotenv.config();
 
-function main() {
+export async function main() {
     console.log("Starting ArcPay Agent...");
+    const isTest = process.env.NODE_ENV === "test";
+    const shouldStartPolling = !isTest;
+    const shouldStartScheduler = !isTest;
+    const shouldStartHttp = !isTest;
+    const port = Number.parseInt(process.env.PORT || "3000", 10) || 3000;
 
     const token = process.env.TELEGRAM_TOKEN;
     const botUsername = process.env.BOT_USERNAME || "ArcPayAgentBot";
@@ -167,7 +173,11 @@ ${rows.join("\n")}`,
         }
     };
 
-    const bot = createBot(token || "mock-token", !!token);
+    if (!token && !isTest) {
+        console.error("[Bot] TELEGRAM_TOKEN is missing. Telegram polling is disabled.");
+    }
+
+    const bot = createBot(token || "mock-token", shouldStartPolling && !!token);
 
     const circleClient = new CircleClient(circleApiKey, circleEntitySecret, circleWalletSetId, circleApiUrl);
     const walletStore = new WalletStore(circleClient);
@@ -560,10 +570,26 @@ ${rows.join("\n")}`,
         conversationMemory, scheduleStore
     );
 
-    // Start scheduler
-    schedulerService.start();
+    if (shouldStartScheduler) {
+        schedulerService.start();
+    }
 
     console.log("Bot initialized!");
+
+    if (shouldStartHttp) {
+        try {
+            await startHealthServer(port);
+            console.log(`[HTTP] Health server listening on port ${port}`);
+        } catch (error) {
+            console.error("[HTTP] Failed to start health server:", error);
+            throw error;
+        }
+    }
 }
 
-main();
+if (process.env.NODE_ENV !== "test") {
+    void main().catch((error) => {
+        console.error("[App] Failed to initialize ArcPay Agent:", error);
+        process.exit(1);
+    });
+}

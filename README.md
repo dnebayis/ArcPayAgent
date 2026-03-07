@@ -68,13 +68,19 @@ TZ=Europe/Istanbul
 Run the bot:
 
 ```bash
-npm start
+npm run dev
 ```
 
 Build for production:
 
 ```bash
 npm run build
+```
+
+Run the production build:
+
+```bash
+npm start
 ```
 
 Run tests:
@@ -121,19 +127,20 @@ This directory is ignored by git and should be treated as runtime state, not sou
 
 ## Deploying to Render
 
-This app should be deployed as a `Background Worker`, not a `Web Service`.
+This app is designed to run on Render as a `Web Service`.
 
 Recommended commands:
 
 ```bash
 Build Command: npm ci && npm run build
-Start Command: node dist/index.js
+Start Command: npm start
 ```
 
 Important notes:
 
 - add environment variables in Render, not in git
-- use a persistent disk if you want `data/` to survive restarts
+- the service exposes `/health` so Render can keep the web service healthy
+- on the free plan, local JSON data is ephemeral across redeploys and restarts
 - run a single worker instance to avoid JSON storage conflicts
 
 ## Security Notes
@@ -148,4 +155,3 @@ Important notes:
 - local persistence is JSON-file based, not database-backed
 - router history scanning is windowed and depends on RPC limits
 - long-term multi-instance scaling is not safe with the current storage model
-

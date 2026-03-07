@@ -1,14 +1,12 @@
 services:
-  - type: worker
+  - type: web
     name: arcpay-agent
     runtime: node
+    plan: free
     autoDeploy: true
+    healthCheckPath: /health
     buildCommand: npm ci && npm run build
-    startCommand: node dist/index.js
-    disk:
-      name: arcpay-data
-      mountPath: /opt/render/project/src/data
-      sizeGB: 1
+    startCommand: npm start
     envVars:
       - key: NODE_VERSION
         value: "22"
