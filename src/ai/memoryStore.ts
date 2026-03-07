@@ -1,5 +1,5 @@
-import fs from 'fs';
 import path from 'path';
+import { loadStore, saveStore } from "../storage/persistence";
 
 export interface PaymentPattern {
     vendor: string;
@@ -21,30 +21,41 @@ export interface UserMemory {
 }
 
 export class MemoryStore {
-    private dataPath: string;
+    private storeName: string;
     private memories: Record<string, UserMemory> = {};
 
     constructor(dataPath: string = path.join(process.cwd(), "data", "memory.json")) {
-        this.dataPath = dataPath;
+        this.storeName = this.resolveStoreName(dataPath);
         this.load();
     }
 
+    private resolveStoreName(dataPath: string): string {
+        const defaultDataDir = path.join(process.cwd(), "data");
+
+        if (!path.isAbsolute(dataPath)) {
+            return dataPath;
+        }
+
+        const relativePath = path.relative(defaultDataDir, dataPath);
+        if (relativePath && !relativePath.startsWith("..")) {
+            return relativePath;
+        }
+
+        return path.basename(dataPath);
+    }
+
     private load() {
-        if (fs.existsSync(this.dataPath)) {
-            try {
-                const data = fs.readFileSync(this.dataPath, 'utf-8');
-                this.memories = JSON.parse(data);
-            } catch (e) {
-                console.error("Failed to load memory store", e);
-            }
+        try {
+            this.memories = loadStore<Record<string, UserMemory>>(this.storeName);
+        } catch (e) {
+            console.error("Failed to load memory store", e);
+            this.memories = {};
         }
     }
 
     private save() {
         try {
-            const dir = path.dirname(this.dataPath);
-            if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-            fs.writeFileSync(this.dataPath, JSON.stringify(this.memories, null, 2));
+            saveStore(this.storeName, this.memories);
         } catch (e) {
             console.error("Failed to save memory store", e);
         }

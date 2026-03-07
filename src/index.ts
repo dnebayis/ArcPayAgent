@@ -26,8 +26,38 @@ import { ScheduleStore } from "./storage/schedules";
 import { SchedulerService } from "./services/scheduler";
 import { parseScheduleDate, formatScheduleTime } from "./utils/dateParser";
 import { MemoryStore } from "./ai/memoryStore";
+import { flushPersistence, getPersistenceBackend, initializePersistence } from "./storage/persistence";
 
 dotenv.config();
+
+let shutdownHandlersRegistered = false;
+
+function registerShutdownHandlers(): void {
+    if (shutdownHandlersRegistered || process.env.NODE_ENV === "test") {
+        return;
+    }
+
+    const shutdown = async (signal: string) => {
+        try {
+            console.log(`[App] ${signal} received. Flushing persistence...`);
+            await flushPersistence();
+        } catch (error) {
+            console.error("[App] Failed to flush persistence during shutdown:", error);
+        } finally {
+            process.exit(0);
+        }
+    };
+
+    process.once("SIGINT", () => {
+        void shutdown("SIGINT");
+    });
+
+    process.once("SIGTERM", () => {
+        void shutdown("SIGTERM");
+    });
+
+    shutdownHandlersRegistered = true;
+}
 
 export async function main() {
     console.log("Starting ArcPay Agent...");
@@ -63,6 +93,10 @@ export async function main() {
         ? Math.min(6, configuredWindowCount)
         : 2;
     const maxScanBlocks = paymentHistoryChunkSize * paymentHistoryWindows;
+
+    await initializePersistence();
+    registerShutdownHandlers();
+    console.log(`[Persistence] Using ${getPersistenceBackend()} backend`);
 
     const formatRouterAddress = (address: string): string => {
         return `${address.slice(0, 6)}...${address.slice(-4)}`;
