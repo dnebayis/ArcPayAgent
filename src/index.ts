@@ -32,6 +32,7 @@ import { UserPreferencesStore } from "./storage/userPreferences";
 import { formatUserDateTime } from "./utils/userDateTime";
 
 dotenv.config();
+process.env.NTBA_FIX_350 = process.env.NTBA_FIX_350 || "1";
 
 let shutdownHandlersRegistered = false;
 
@@ -159,7 +160,10 @@ export async function main() {
             if (isPending) {
                 bot.sendMessage(chatId, "On-chain pending status is not exposed on this router. Use `payment history` to review executed payments.", { parse_mode: "Markdown" });
             } else {
-                analyticsEngine.showHistory(chatId);
+                bot.sendMessage(
+                    chatId,
+                    "⚠️ On-chain recent payments are unavailable right now because router activity is disabled. Use `payment history` for your recorded payment log."
+                );
             }
             return;
         }
