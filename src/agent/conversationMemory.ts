@@ -157,6 +157,21 @@ export class ConversationMemory {
         return `The last payment I prepared was ${payment.amount} USDC to ${payment.beneficiary}.`;
     }
 
+    describeLastPaymentAmount(chatId: number): string | null {
+        const payment = this.ensure(chatId).lastPayment;
+        if (!payment) return null;
+        return `The last payment amount was ${payment.amount} USDC.`;
+    }
+
+    describeLastInvoiceAmount(chatId: number): string | null {
+        const invoice = this.ensure(chatId).lastInvoice;
+        if (!invoice) return null;
+        const amount = invoice.detectedAmount || invoice.amount;
+        const currency = invoice.detectedCurrency || invoice.currency || "USD";
+        if (!amount) return null;
+        return `The last invoice amount was ${amount} ${currency}.`;
+    }
+
     /** Build a context summary string for the LLM */
     buildContextSummary(chatId: number): string {
         const ctx = this.ensure(chatId);

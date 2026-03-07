@@ -239,7 +239,11 @@ ${rows.join("\n")}`,
             ? `Top vendor (30d): **${topVendor.vendor}** — ${topVendor.total} USDC`
             : "Top vendor (30d): None yet";
 
-        return `🏦 **Account Summary**\n\nAddress: \`${address}\`\nAvailable balance: **${balance} USDC**\nSpent in the last 30 days: **${spent30d} USDC**\nRecorded payments: **${recordedPayments}**\nSaved vendors: **${vendorCount}**\nActive schedules: **${activeSchedules}**\n${topVendorLine}\n${lastPaymentLine}\n\nTry \`wallet balance\`, \`payment history\`, or \`list schedules\`.`;
+        const readinessLine = vendorCount > 0
+            ? "Account state: **Ready to send and schedule payments**"
+            : "Account state: **Wallet ready — add a vendor to speed up payments**";
+
+        return `🏦 **Account Summary**\n\nAddress: \`${address}\`\nAvailable balance: **${balance} USDC**\nSpent in the last 30 days: **${spent30d} USDC**\nRecorded payments: **${recordedPayments}**\nSaved vendors: **${vendorCount}**\nActive schedules: **${activeSchedules}**\n${readinessLine}\n${topVendorLine}\n${lastPaymentLine}\n\nTry \`wallet balance\`, \`payment history\`, or \`list schedules\`.`;
     };
 
     if (!token && !isTest) {

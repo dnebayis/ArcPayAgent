@@ -169,6 +169,22 @@ export class InvoiceEngine {
         ];
     }
 
+    private buildReadinessLine(extracted: ExtractedInvoice, risk: RiskResult | null, canPreparePayment: boolean): string {
+        if (!this.getSettlementAmount(extracted)) {
+            return "Payment readiness: **Waiting for FX conversion**";
+        }
+        if (!canPreparePayment) {
+            return "Payment readiness: **Save the vendor first**";
+        }
+        if (risk?.level === "HIGH_RISK") {
+            return "Payment readiness: **Blocked until you review the risk flags**";
+        }
+        if (risk?.level === "REVIEW") {
+            return "Payment readiness: **Review recommended before payment**";
+        }
+        return "Payment readiness: **Ready to prepare**";
+    }
+
     private normalizeAmountValue(raw: string): string {
         if (/\d{1,3}\.\d{3}/.test(raw) || /,\d{2}$/.test(raw)) {
             return raw.replace(/\./g, "").replace(",", ".");
@@ -431,6 +447,7 @@ export class InvoiceEngine {
                 message += `Resolved address: \`${vendorInfo.resolvedAddress}\`\n`;
             }
             message += `${this.buildInvoiceAmountLines(extracted).join("\n")}\n`;
+            message += `${this.buildReadinessLine(extracted, null, vendorInfo.canPreparePayment)}\n`;
             if (extracted.invoiceNumber) message += `Invoice #: ${extracted.invoiceNumber}\n`;
             if (extracted.date) message += `Date: ${extracted.date}\n`;
             message += `\n⚠️ FX conversion is unavailable right now, so I won't prepare this payment automatically.\n\n`;
@@ -457,6 +474,7 @@ export class InvoiceEngine {
                 message += `Resolved address: \`${vendorInfo.resolvedAddress}\`\n`;
             }
             message += `${this.buildInvoiceAmountLines(extracted).join("\n")}\n`;
+            message += `${this.buildReadinessLine(extracted, risk, vendorInfo.canPreparePayment)}\n`;
             if (extracted.invoiceNumber) message += `Invoice #: ${extracted.invoiceNumber}\n`;
             if (extracted.date) message += `Date: ${extracted.date}\n`;
             message += RiskEngine.formatRiskMessage(risk);
@@ -489,6 +507,7 @@ export class InvoiceEngine {
                 message += `Resolved address: \`${vendorInfo.resolvedAddress}\`\n`;
             }
             message += `${this.buildInvoiceAmountLines(extracted).join("\n")}\n`;
+            message += `${this.buildReadinessLine(extracted, risk, vendorInfo.canPreparePayment)}\n`;
             if (extracted.invoiceNumber) message += `Invoice #: ${extracted.invoiceNumber}\n`;
             if (extracted.date) message += `Date: ${extracted.date}\n`;
             message += RiskEngine.formatRiskMessage(risk);
@@ -528,6 +547,7 @@ export class InvoiceEngine {
             message += `Resolved address: \`${vendorInfo.resolvedAddress}\`\n`;
         }
         message += `${this.buildInvoiceAmountLines(extracted).join("\n")}\n`;
+        message += `${this.buildReadinessLine(extracted, null, vendorInfo.canPreparePayment)}\n`;
         if (extracted.invoiceNumber) message += `Invoice #: ${extracted.invoiceNumber}\n`;
         if (extracted.date) message += `Date: ${extracted.date}\n`;
         message += `\n✅ Risk check passed\n\n`;

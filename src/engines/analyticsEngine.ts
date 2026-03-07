@@ -116,6 +116,8 @@ export class AnalyticsEngine {
             msg += `• ${dateStr} — **${p.amount} USDC** → ${target}\n`;
         }
 
+        msg += `\nTip: use \`account summary\` for a broader account view.`;
+
         this.bot.sendMessage(chatId, msg, { parse_mode: "Markdown" });
     }
 

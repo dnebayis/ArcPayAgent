@@ -321,11 +321,27 @@ export class IntentParser {
             };
         }
 
+        const lastPaymentAmountQuery = /^(how\s+much\s+was\s+my\s+last\s+payment|what\s+was\s+the\s+last\s+payment\s+amount|what\s+amount\s+did\s+i\s+(?:just\s+)?pay)$/i;
+        if (lastPaymentAmountQuery.test(lower) && ctx.lastPayment) {
+            return {
+                action: "chat",
+                message: this.memory.describeLastPaymentAmount(chatId) || "I know there was a recent payment, but I couldn't read the amount cleanly."
+            };
+        }
+
         const lastInvoiceQuery = /^(what\s+invoice\s+did\s+we\s+(?:just\s+)?analy[sz]e|which\s+invoice\s+did\s+we\s+(?:just\s+)?analy[sz]e|who\s+was\s+that\s+invoice\s+from|what\s+was\s+the\s+last\s+invoice)$/i;
         if (lastInvoiceQuery.test(lower) && ctx.lastInvoice) {
             return {
                 action: "chat",
                 message: this.memory.describeLastInvoice(chatId) || "I analyzed an invoice recently, but I couldn't summarize it cleanly."
+            };
+        }
+
+        const lastInvoiceAmountQuery = /^(how\s+much\s+was\s+that\s+invoice|what\s+was\s+the\s+invoice\s+amount|what\s+amount\s+was\s+the\s+last\s+invoice)$/i;
+        if (lastInvoiceAmountQuery.test(lower) && ctx.lastInvoice) {
+            return {
+                action: "chat",
+                message: this.memory.describeLastInvoiceAmount(chatId) || "I know there was a recent invoice, but I couldn't read the amount cleanly."
             };
         }
 
