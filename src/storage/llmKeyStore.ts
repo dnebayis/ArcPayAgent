@@ -23,6 +23,15 @@ export class LLMKeyStore {
         saveStore(LLM_FILE, this.store);
     }
 
+    private tryDecrypt(metadata: LLMMetadata): string | null {
+        try {
+            return KeyVault.decryptPrivateKey(metadata.encryptedKey, this.llmSecret);
+        } catch (error) {
+            console.warn("[LLMKeyStore] Stored LLM key could not be decrypted. The user should set it again.", error);
+            return null;
+        }
+    }
+
     setKey(chatId: string | number, provider: string, key: string): void {
         const id = chatId.toString();
         const encryptedKey = KeyVault.encryptPrivateKey(key, this.llmSecret);
@@ -35,9 +44,14 @@ export class LLMKeyStore {
         const metadata = this.store[id];
         if (!metadata) return null;
 
+        const decryptedKey = this.tryDecrypt(metadata);
+        if (!decryptedKey) {
+            return null;
+        }
+
         return {
             provider: metadata.provider,
-            key: KeyVault.decryptPrivateKey(metadata.encryptedKey, this.llmSecret),
+            key: decryptedKey,
             model: metadata.model
         };
     }
@@ -63,13 +77,18 @@ export class LLMKeyStore {
     }
 
     hasKey(chatId: string | number): boolean {
-        return !!this.store[chatId.toString()];
+        const metadata = this.store[chatId.toString()];
+        if (!metadata) return false;
+        return this.tryDecrypt(metadata) !== null;
     }
 
     getStatus(chatId: string | number): string {
         const id = chatId.toString();
         const metadata = this.store[id];
         if (!metadata) return "No LLM key configured.";
+        if (!this.tryDecrypt(metadata)) {
+            return "LLM key is configured but invalid for the current encryption secret. Please set it again.";
+        }
         const modelStr = metadata.model ? ` (model: ${metadata.model})` : "";
         return `LLM key configured for provider: ${metadata.provider}${modelStr}`;
     }
