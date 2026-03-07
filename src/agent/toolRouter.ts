@@ -21,12 +21,6 @@ export class ToolRouter {
             return false;
         }
 
-        const plan = intent.plan && intent.plan.length > 0 ? intent.plan : this.defaultPlan(intent.action);
-        if (plan.length > 0) {
-            const planMsg = `PLAN:\n${plan.map(p => `• ${p}`).join("\n")}`;
-            this.bot.sendMessage(chatId, planMsg);
-        }
-
         if (intent.confidence !== undefined && intent.confidence < 0.45) {
             const ask = intent.message || "To be sure: what exactly would you like me to do?";
             this.bot.sendMessage(chatId, ask);
@@ -39,19 +33,6 @@ export class ToolRouter {
         } catch (error: any) {
             this.bot.sendMessage(chatId, `❌ Error executing action: ${error.message}`);
             return false;
-        }
-    }
-
-    private defaultPlan(action: string): string[] {
-        switch (action) {
-            case "status":
-                return ["Fetch wallet/account state", "Send status summary"];
-            case "greeting":
-                return ["Send greeting and capabilities"];
-            case "acknowledgment":
-                return ["Acknowledge user message"];
-            default:
-                return [];
         }
     }
 }
