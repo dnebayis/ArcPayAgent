@@ -24,7 +24,7 @@ export class ToolRouter {
                     schedule_time: intent.schedule_time
                 });
             }
-            const ask = intent.message || "Please clarify what you want me to do.";
+            const ask = intent.message || this.buildClarification(intent);
             this.bot.sendMessage(chatId, ask);
             return false;
         }
@@ -53,5 +53,32 @@ export class ToolRouter {
             this.bot.sendMessage(chatId, `❌ I couldn't complete that action: ${error.message}`);
             return false;
         }
+    }
+
+    private buildClarification(intent: ParsedIntent): string {
+        if (intent.action === "create_payment") {
+            if (intent.amount && !intent.beneficiary) {
+                return `Who should I send ${intent.amount} USDC to? Use a saved vendor or a full 0x address.`;
+            }
+            if (!intent.amount && intent.beneficiary) {
+                return `How much USDC should I send to ${intent.beneficiary}?`;
+            }
+            return "Tell me the amount and recipient. Example: `send 5 usdc to jack`";
+        }
+
+        if (intent.action === "schedule_payment") {
+            if (intent.amount && intent.beneficiary && !intent.schedule_time) {
+                return `When should I schedule ${intent.amount} USDC to ${intent.beneficiary}? Example: \`tomorrow 12:00\``;
+            }
+            if (intent.amount && !intent.beneficiary) {
+                return "Who should I schedule this payment to? Use a saved vendor or a full 0x address.";
+            }
+            if (!intent.amount && intent.beneficiary) {
+                return `How much USDC should I schedule for ${intent.beneficiary}?`;
+            }
+            return "Tell me the amount, recipient, and time. Example: `schedule payment 10 usdc to aws tomorrow`";
+        }
+
+        return "Please clarify what you want me to do.";
     }
 }

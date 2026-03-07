@@ -39,7 +39,17 @@ export function detectIntent(text: string): DetectedIntent | null {
         };
     }
 
-    const explicitScheduleCandidatePattern = /^schedule\s+payment\s+(\d+(?:\.\d+)?)\s+usd[c]?\s+(?:to\s+)?(0[xX][a-fA-F0-9]{40}|[a-zA-Z0-9_]+)\s+(.+)$/i;
+    const explicitScheduleNoTimePattern = /^schedule\s+payment\s+(\d+(?:\.\d+)?)\s+usd[c]?\s+(?:to\s+)?(0[xX][a-fA-F0-9]{40}|[a-zA-Z0-9_]+)$/i;
+    const explicitScheduleNoTimeMatch = text.match(explicitScheduleNoTimePattern);
+    if (explicitScheduleNoTimeMatch) {
+        return {
+            action: "schedule_payment",
+            amount: parseFloat(explicitScheduleNoTimeMatch[1]),
+            beneficiary: explicitScheduleNoTimeMatch[2]
+        };
+    }
+
+    const explicitScheduleCandidatePattern = /^schedule\s+payment\s+(\d+(?:\.\d+)?)\s+usd[c]?\s+(?:to\s+)?(0[xX][a-fA-F0-9]{40}|(?!to\b)[a-zA-Z0-9_]+)\s+(.+)$/i;
     const explicitScheduleCandidateMatch = text.match(explicitScheduleCandidatePattern);
     if (explicitScheduleCandidateMatch) {
         return {
@@ -99,9 +109,15 @@ export function detectIntent(text: string): DetectedIntent | null {
         return { action: "create_payment", amount: parseFloat(transferMatch[1]), beneficiary: transferMatch[2] };
     }
 
+    const sendAmountOnlyPattern = /^(?:send|pay|transfer)\s+(\d+(?:\.\d+)?)\s*(?:usd|usdc)?$/i;
+    const sendAmountOnlyMatch = text.match(sendAmountOnlyPattern);
+    if (sendAmountOnlyMatch) {
+        return { action: "create_payment", amount: parseFloat(sendAmountOnlyMatch[1]) };
+    }
+
     const sendNoAmountPattern = /^(?:send|pay)\s+([a-zA-Z0-9_x]+)$/i;
     const sendNoAmountMatch = text.match(sendNoAmountPattern);
-    if (sendNoAmountMatch) {
+    if (sendNoAmountMatch && !/^\d+(?:\.\d+)?$/.test(sendNoAmountMatch[1])) {
         return { action: "create_payment", beneficiary: sendNoAmountMatch[1] };
     }
 

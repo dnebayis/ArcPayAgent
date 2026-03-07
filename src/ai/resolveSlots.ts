@@ -29,13 +29,6 @@ export function resolveSlots(input: SlotResolutionInput): SlotResolutionInput["i
                 ctx?.lastPayment?.beneficiary ||
                 resolved.beneficiary;
         }
-
-        if ((resolved.amount === undefined || resolved.amount === null) && resolved.beneficiary && memoryStore) {
-            const avg = memoryStore.getAveragePayment(chatId, resolved.beneficiary);
-            if (avg !== null) {
-                resolved.amount = parseFloat(avg.toFixed(2));
-            }
-        }
     }
 
     if (resolved.action === "schedule_payment") {

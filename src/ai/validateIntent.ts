@@ -25,7 +25,9 @@ export function validateIntent(intent: IntentToValidate): ValidationResult {
             return {
                 safeToExecute: false,
                 needsClarification: true,
-                message: "Who should I send the payment to?"
+                message: intent.amount
+                    ? `Who should I send ${intent.amount} USDC to?`
+                    : "Who should I send the payment to?"
             };
         }
 
@@ -67,7 +69,9 @@ export function validateIntent(intent: IntentToValidate): ValidationResult {
             return {
                 safeToExecute: false,
                 needsClarification: true,
-                message: "When should I schedule this payment?"
+                message: intent.amount && intent.beneficiary
+                    ? `When should I schedule ${intent.amount} USDC to ${intent.beneficiary}?`
+                    : "When should I schedule this payment?"
             };
         }
 

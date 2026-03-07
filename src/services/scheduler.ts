@@ -58,7 +58,6 @@ export class SchedulerService {
                         inline_keyboard: [
                             [
                                 { text: "✅ Send now", callback_data: `sched_pay_${chatId}_${schedule.id}` },
-                                { text: "⏭️ Skip", callback_data: `sched_skip_${chatId}_${schedule.id}` },
                                 { text: "❌ Cancel", callback_data: `sched_cancel_${chatId}_${schedule.id}` }
                             ]
                         ]

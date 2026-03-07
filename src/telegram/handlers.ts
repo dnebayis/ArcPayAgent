@@ -223,33 +223,87 @@ Only the wallet owner can use payment, request, and schedule action buttons.`;
                     conversationMemory.addBotMessage(chatId, intent.message);
                 } else {
                     // Action intent — add a description so LLM knows what happened
-                    const actionSummaries: Record<string, string> = {
-                        show_wallet: "I showed the user their wallet address.",
-                        create_wallet: "I created a new wallet for the user.",
-                        status: "I showed the user their account status.",
-                        list_vendors: "I listed the user's saved vendors.",
-                        vendor_detail: "I showed detailed stats for a vendor.",
-                        top_vendors: "I showed the user's top vendors by spending.",
-                        export_wallet: "I showed wallet export information.",
-                        report: "I showed the spending report.",
-                        spending_by_vendor: "I showed spending breakdown by vendor.",
-                        payment_history: "I showed recent payment history.",
-                        monthly_spending: "I showed monthly spending breakdown.",
-                        analyze_invoice: "I asked the user to send an invoice file.",
-                        create_payment: "I prepared a payment for the user.",
-                        save_vendor: "I saved a vendor for the user.",
-                        remove_vendor: "I removed a vendor for the user.",
-                        remove_all_vendors: "I removed all vendors for the user.",
-                        create_payment_request: "I created a payment request link.",
-                        schedule_payment: "I scheduled a future payment for the user.",
-                        list_schedules: "I listed the user's scheduled payments.",
-                        cancel_schedule: "I cancelled a scheduled payment.",
-                        show_pending_payments: "I showed the user their pending router payments.",
-                        show_recent_payments: "I showed the user their recent router payments.",
-                        wallet_intelligence: "I showed the user their Circle wallet intelligence and balance.",
-                    };
-                    const summary = actionSummaries[intent.action] || `I executed the ${intent.action} action.`;
+                    let summary = `I executed the ${intent.action} action.`;
+                    switch (intent.action) {
+                        case "show_wallet":
+                            summary = "I showed the wallet address.";
+                            break;
+                        case "create_wallet":
+                            summary = "I created a new wallet.";
+                            break;
+                        case "status":
+                            summary = "I showed the account status.";
+                            break;
+                        case "list_vendors":
+                            summary = "I listed the saved vendors.";
+                            break;
+                        case "vendor_detail":
+                            summary = intent.name ? `I showed details for vendor ${intent.name}.` : "I showed vendor details.";
+                            break;
+                        case "top_vendors":
+                            summary = "I showed the top vendors by spending.";
+                            break;
+                        case "export_wallet":
+                            summary = "I showed the wallet export details.";
+                            break;
+                        case "report":
+                            summary = "I showed the spending report.";
+                            break;
+                        case "spending_by_vendor":
+                            summary = "I showed spending broken down by vendor.";
+                            break;
+                        case "payment_history":
+                            summary = "I showed recent payment history.";
+                            break;
+                        case "monthly_spending":
+                            summary = "I showed the monthly spending breakdown.";
+                            break;
+                        case "analyze_invoice":
+                            summary = "I asked for an invoice file to analyze.";
+                            break;
+                        case "create_payment":
+                            summary = intent.amount && intent.beneficiary
+                                ? `I prepared a payment of ${intent.amount} USDC to ${intent.beneficiary}.`
+                                : "I prepared a payment.";
+                            if (intent.amount && intent.beneficiary) {
+                                conversationMemory.setLastPayment(chatId, intent.beneficiary, intent.amount.toString());
+                            }
+                            break;
+                        case "save_vendor":
+                            summary = intent.name ? `I saved vendor ${intent.name}.` : "I saved a vendor.";
+                            break;
+                        case "remove_vendor":
+                            summary = intent.name ? `I removed vendor ${intent.name}.` : "I removed a vendor.";
+                            break;
+                        case "remove_all_vendors":
+                            summary = "I removed all saved vendors.";
+                            break;
+                        case "create_payment_request":
+                            summary = intent.amount ? `I created a payment request for ${intent.amount} USDC.` : "I created a payment request.";
+                            break;
+                        case "schedule_payment":
+                            summary = intent.amount && intent.beneficiary
+                                ? `I scheduled ${intent.amount} USDC to ${intent.beneficiary}.`
+                                : "I scheduled a payment.";
+                            break;
+                        case "list_schedules":
+                            summary = "I listed the scheduled payments.";
+                            break;
+                        case "cancel_schedule":
+                            summary = intent.name ? `I cancelled schedule ${intent.name}.` : "I cancelled a schedule.";
+                            break;
+                        case "show_pending_payments":
+                            summary = "I showed pending router payment status.";
+                            break;
+                        case "show_recent_payments":
+                            summary = "I showed recent router payment activity.";
+                            break;
+                        case "wallet_intelligence":
+                            summary = "I showed the live wallet balance and recent activity.";
+                            break;
+                    }
                     conversationMemory.addBotMessage(chatId, summary);
+                    conversationMemory.recordAction(chatId, intent.action, summary);
                 }
             }
         } catch (error) {
@@ -408,22 +462,6 @@ Only the wallet owner can use payment, request, and schedule action buttons.`;
             } else {
                 bot.answerCallbackQuery(query.id, { text: "Schedule not found." });
             }
-            return;
-        }
-
-        if (data.startsWith("sched_skip_") && scheduleStore) {
-            const parts = data.replace("sched_skip_", "").split("_");
-            const ownerChatId = parseInt(parts[0], 10);
-            const scheduleId = parts.slice(1).join("_");
-            if (!Number.isInteger(ownerChatId) || ownerChatId !== senderId) {
-                await rejectUnauthorized();
-                return;
-            }
-            scheduleStore.markExecuted(ownerChatId, scheduleId);
-            bot.editMessageText("⏭️ Scheduled payment skipped.", {
-                chat_id: chatId,
-                message_id: query.message.message_id
-            });
             return;
         }
 

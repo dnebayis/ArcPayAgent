@@ -151,13 +151,13 @@ export async function main() {
         const walletAddress = walletStore.getWalletAddress(chatId);
 
         if (!walletAddress) {
-            bot.sendMessage(chatId, "You don't have a wallet yet. Send \"create wallet\" to generate one.");
+            bot.sendMessage(chatId, "You don't have a wallet yet. Try `create wallet` to get started.", { parse_mode: "Markdown" });
             return;
         }
 
         if (paymentHistorySource !== "router") {
             if (isPending) {
-                bot.sendMessage(chatId, "On-chain pending payments are not exposed on this router. Use `payment_history` for executed history.", { parse_mode: "Markdown" });
+                bot.sendMessage(chatId, "On-chain pending status is not exposed on this router. Use `payment history` to review executed payments.", { parse_mode: "Markdown" });
             } else {
                 analyticsEngine.showHistory(chatId);
             }
@@ -173,7 +173,7 @@ export async function main() {
                 if (isPending) {
                     bot.sendMessage(chatId, "✅ No pending router payments. Router executes instantly after confirm.");
                 } else {
-                    bot.sendMessage(chatId, "📜 No recent router payments found in the scanned blocks.");
+                    bot.sendMessage(chatId, "📜 No recent router payments found yet. Once you send a payment, activity will appear here.");
                 }
                 return;
             }
@@ -294,7 +294,7 @@ ${rows.join("\n")}`,
     registry.register("list_vendors", "List saved vendors", (chatId) => {
         const vendors = vendorStore.getVendorsWithStats(chatId);
         if (!vendors || Object.keys(vendors).length === 0) {
-            bot.sendMessage(chatId, "No vendors saved yet. Use: `save vendor <name> <address>`", { parse_mode: "Markdown" });
+            bot.sendMessage(chatId, "No vendors saved yet. Try `save vendor jack 0x...` to add your first one.", { parse_mode: "Markdown" });
             return;
         }
         let msg = "📋 **Your Vendors**\n\n";
@@ -341,7 +341,7 @@ ${rows.join("\n")}`,
     registry.register("top_vendors", "Show top vendors by spending", (chatId) => {
         const top = vendorStore.getTopVendors(chatId);
         if (top.length === 0) {
-            bot.sendMessage(chatId, "No vendor payment data yet. Send some payments first!");
+            bot.sendMessage(chatId, "No vendor payment data yet. Send a payment first, then ask for `top vendors`.", { parse_mode: "Markdown" });
             return;
         }
 
@@ -418,7 +418,7 @@ ${rows.join("\n")}`,
         const address = walletStore.getWalletAddress(chatId);
         const walletId = walletStore.getWalletId(chatId);
         if (!address || !walletId) {
-            bot.sendMessage(chatId, "You don't have a wallet yet. Send \"create wallet\" to generate one.");
+            bot.sendMessage(chatId, "You don't have a wallet yet. Try `create wallet` to get started.", { parse_mode: "Markdown" });
             return;
         }
 
@@ -463,7 +463,7 @@ ${rows.join("\n")}`,
         if (address) {
             bot.sendMessage(chatId, `🔐 **Account Status**\n\nWallet: Active\nAddress: \`${address}\``, { parse_mode: "Markdown" });
         } else {
-            bot.sendMessage(chatId, "You don't have a wallet yet. Send \"create wallet\" to generate one.");
+            bot.sendMessage(chatId, "You don't have a wallet yet. Try `create wallet` to get started.", { parse_mode: "Markdown" });
         }
     });
 
@@ -473,20 +473,20 @@ ${rows.join("\n")}`,
         if (address) {
             bot.sendMessage(chatId, `ℹ️ **Circle Programmable Wallet**\n\nYour wallet is securely managed by Circle Developer-Controlled Wallets.\n\n**Wallet Address:**\n\`${address}\``, { parse_mode: "Markdown" });
         } else {
-            bot.sendMessage(chatId, "No wallet to export. Send \"create wallet\" first.");
+            bot.sendMessage(chatId, "No wallet to export yet. Try `create wallet` first.", { parse_mode: "Markdown" });
         }
     });
 
     registry.register("create_wallet", "Create a new wallet", async (chatId) => {
         if (walletStore.hasWallet(chatId)) {
-            bot.sendMessage(chatId, `Your wallet already exists.\n\nAddress:\n${walletStore.getWalletAddress(chatId)}`);
+            bot.sendMessage(chatId, `Your wallet already exists.\n\nAddress:\n${walletStore.getWalletAddress(chatId)}\n\nNext: try \`wallet balance\` or \`show wallet\`.`, { parse_mode: "Markdown" });
             return;
         }
 
         try {
             bot.sendMessage(chatId, "⏳ creating secure Circle wallet...");
             const address = await walletStore.createWallet(chatId);
-            bot.sendMessage(chatId, `✅ Wallet created.\n\nAddress:\n${address}`);
+            bot.sendMessage(chatId, `✅ Wallet created.\n\nAddress:\n${address}\n\nNext: save a vendor with \`save vendor jack 0x...\` or check \`wallet balance\`.`, { parse_mode: "Markdown" });
         } catch (error: any) {
             bot.sendMessage(chatId, `❌ Failed to create wallet: ${error.message}`);
         }
@@ -495,9 +495,9 @@ ${rows.join("\n")}`,
     registry.register("show_wallet", "Show wallet address", (chatId) => {
         const address = walletStore.getWalletAddress(chatId);
         if (address) {
-            bot.sendMessage(chatId, `Your wallet address:\n${address}`);
+            bot.sendMessage(chatId, `Your wallet address:\n${address}\n\nNext: try \`wallet balance\` to check activity.`, { parse_mode: "Markdown" });
         } else {
-            bot.sendMessage(chatId, `You don't have a wallet yet. Send "create wallet" to generate one.`);
+            bot.sendMessage(chatId, "You don't have a wallet yet. Try `create wallet` to get started.", { parse_mode: "Markdown" });
         }
     });
 
@@ -530,7 +530,7 @@ ${rows.join("\n")}`,
         const scheduleLabel = beneficiaryInput;
 
         if (!scheduleAddress) {
-            bot.sendMessage(chatId, `❌ Vendor "${intent.beneficiary}" not found. Save it first.`);
+            bot.sendMessage(chatId, `❌ Vendor "${intent.beneficiary}" not found. Save it first, or use a full 0x wallet address.`);
             return;
         }
 
@@ -582,7 +582,7 @@ ${rows.join("\n")}`,
 
         bot.sendMessage(
             chatId,
-            `✅ **Payment scheduled**\n\n${schedule.amount} USDC → **${schedule.vendor}**\nExecution: ${formatUserDateTime(schedule.nextExecution, preferences)}\nFrequency: ${schedule.frequency}\nID: \`${schedule.id}\``,
+            `✅ **Payment scheduled**\n\n${schedule.amount} USDC → **${schedule.vendor}**\nExecution: ${formatUserDateTime(schedule.nextExecution, preferences)}\nFrequency: ${schedule.frequency}\nID: \`${schedule.id}\`\n\nI'll send you a reminder when it's due.`,
             { parse_mode: "Markdown" }
         );
     });
@@ -590,7 +590,7 @@ ${rows.join("\n")}`,
     registry.register("list_schedules", "List scheduled payments", (chatId) => {
         const schedules = scheduleStore.getSchedules(chatId);
         if (schedules.length === 0) {
-            bot.sendMessage(chatId, "📅 No scheduled payments.");
+            bot.sendMessage(chatId, "📅 No scheduled payments yet. Try `schedule payment 10 usdc to aws tomorrow`.", { parse_mode: "Markdown" });
             return;
         }
 
@@ -599,6 +599,7 @@ ${rows.join("\n")}`,
         for (const s of schedules) {
             msg += `• \`${s.id}\` — **${s.amount} USDC** → ${s.vendor} (${formatUserDateTime(s.nextExecution, preferences)}, ${s.frequency})\n`;
         }
+        msg += `\nUse \`cancel schedule <id>\` if you want to remove one.`;
         bot.sendMessage(chatId, msg, { parse_mode: "Markdown" });
     });
 

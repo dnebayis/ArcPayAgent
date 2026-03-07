@@ -154,6 +154,16 @@ export class IntentParser {
             };
         }
 
+        const explicitScheduleNoTimePattern = /^schedule\s+payment\s+(\d+(?:\.\d+)?)\s+usdc\s+(?:to\s+)?(0[xX][a-fA-F0-9]{40}|[a-zA-Z0-9_]+)$/i;
+        const explicitScheduleNoTimeMatch = text.match(explicitScheduleNoTimePattern);
+        if (explicitScheduleNoTimeMatch) {
+            return {
+                action: "schedule_payment",
+                amount: parseFloat(explicitScheduleNoTimeMatch[1]),
+                beneficiary: explicitScheduleNoTimeMatch[2]
+            };
+        }
+
         // schedule payment: send/pay/transfer 1 usdc to jack after 10 seconds
         const scheduledPaymentPattern = new RegExp(
             `^(?:send|pay|transfer)\\s+(\\d+(?:\\.\\d+)?)\\s+usdc\\s+(?:to\\s+)?(0[xX][a-fA-F0-9]{40}|[a-zA-Z0-9_]+)\\s+${timeExpression}$`,
@@ -189,10 +199,14 @@ export class IntentParser {
         const mt = text.match(transferPattern);
         if (mt) return { action: "create_payment", amount: parseFloat(mt[1]), beneficiary: mt[2] };
 
+        const sendAmountOnly = /^(?:send|pay|transfer)\s+(\d+(?:\.\d+)?)\s*(?:usdc)?$/i;
+        const mAmountOnly = text.match(sendAmountOnly);
+        if (mAmountOnly) return { action: "create_payment", amount: parseFloat(mAmountOnly[1]) };
+
         // send jack / pay jack (no amount) -> ask for amount, keep beneficiary
         const sendNoAmount1 = /^(?:send|pay)\s+([a-zA-Z0-9_x]+)$/i;
         const mNoAmt1 = text.match(sendNoAmount1);
-        if (mNoAmt1) return { action: "create_payment", beneficiary: mNoAmt1[1] };
+        if (mNoAmt1 && !/^\d+(?:\.\d+)?$/.test(mNoAmt1[1])) return { action: "create_payment", beneficiary: mNoAmt1[1] };
 
         // save vendor jack 0xabc...
         const vendorPattern = /^(?:save|add)\s+vendor\s+([a-zA-Z0-9_]+)\s+(0[xX][a-fA-F0-9]{40})/i;
@@ -268,12 +282,10 @@ export class IntentParser {
         // ── Asking about the last invoice ──
         const invoiceQuery = /^(how\s+much|what\s+was|details?\s+(of|about)|show\s+(me\s+)?(the|that)|tell\s+me\s+about)\s*(the\s+)?(invoice|bill|pdf|document)?$/i;
         if (invoiceQuery.test(lower) && ctx.lastInvoice) {
-            const inv = ctx.lastInvoice;
-            let msg = `📄 Here's the last invoice I analyzed:\n\n`;
-            if (inv.vendor) msg += `• Vendor: *${inv.vendor}*\n`;
-            if (inv.amount) msg += `• Amount: *${inv.amount} ${inv.currency || "USD"}*\n`;
-            if (inv.invoiceNumber) msg += `• Invoice #: ${inv.invoiceNumber}\n`;
-            msg += `\nWould you like me to prepare this payment?`;
+            const description = this.memory.describeLastInvoice(chatId);
+            const msg = description
+                ? `${description}\n\nWould you like me to prepare the payment?`
+                : "I analyzed an invoice recently. Want me to prepare the payment?";
             return { action: "chat", message: msg };
         }
 
@@ -288,6 +300,33 @@ export class IntentParser {
             };
         }
 
+        const lastPaymentQuery = /^(who\s+did\s+i\s+(?:just\s+)?(?:pay|send(?:\s+money)?)\s*(?:to)?|what\s+did\s+i\s+(?:just\s+)?pay|what\s+was\s+my\s+last\s+payment|who\s+was\s+my\s+last\s+payment\s+to)$/i;
+        if (lastPaymentQuery.test(lower) && ctx.lastPayment) {
+            return {
+                action: "chat",
+                message: this.memory.describeLastPayment(chatId) || "I have your last payment in memory, but I couldn't summarize it cleanly."
+            };
+        }
+
+        const lastInvoiceQuery = /^(what\s+invoice\s+did\s+we\s+(?:just\s+)?analy[sz]e|which\s+invoice\s+did\s+we\s+(?:just\s+)?analy[sz]e|who\s+was\s+that\s+invoice\s+from|what\s+was\s+the\s+last\s+invoice)$/i;
+        if (lastInvoiceQuery.test(lower) && ctx.lastInvoice) {
+            return {
+                action: "chat",
+                message: this.memory.describeLastInvoice(chatId) || "I analyzed an invoice recently, but I couldn't summarize it cleanly."
+            };
+        }
+
+        const lastActivityQuery = /^(what\s+did\s+we\s+(?:just\s+)?do|what\s+was\s+the\s+last\s+thing\s+we\s+did|what\s+did\s+you\s+just\s+do)$/i;
+        if (lastActivityQuery.test(lower)) {
+            const activity = this.memory.getLastActivity(chatId);
+            if (activity) {
+                return {
+                    action: "chat",
+                    message: `The last thing we did was: ${activity.summary}`
+                };
+            }
+        }
+
         return null;
     }
 
@@ -296,6 +335,8 @@ export class IntentParser {
 
         const session = this.sessionStore.getSession(chatId);
         const lower = text.toLowerCase().trim();
+        const amountOnlyMatch = lower.match(/^(\d+(?:\.\d+)?)\s*(?:usd|usdc)?$/i);
+        const recipientReplyMatch = lower.match(/^(?:to\s+|use\s+)?([a-zA-Z0-9_]+)(?:\s+instead)?$/i);
 
         // If there's a pending payment
         if (session.pendingAction === 'confirm_payment' && session.pendingPayment) {
@@ -312,8 +353,8 @@ export class IntentParser {
             // Handle amount modifications: "actually make it 3", "change to 5 usdc", "make it 10"
             const changeAmountMatch = /(?:actually\s+)?(?:make\s+it|change\s+to|update\s+to)\s+(\d+(?:\.\d+)?)/i;
             const amountMatch = lower.match(changeAmountMatch);
-            if (amountMatch) {
-                const newAmount = parseFloat(amountMatch[1]);
+            if (amountMatch || amountOnlyMatch) {
+                const newAmount = parseFloat((amountMatch?.[1] || amountOnlyMatch?.[1]) as string);
                 this.sessionStore.updatePendingPayment(chatId, { amount: newAmount });
                 return {
                     action: "update_payment_amount",
@@ -324,11 +365,11 @@ export class IntentParser {
 
             // Handle vendor modifications: "use the same vendor", "change to jack"
             // Though changing vendor is slightly more complex, we can handle basic updates
-            const changeVendorMatch = /(?:change\s+to|use)\s+([a-zA-Z0-9_x]+)/i;
+            const changeVendorMatch = /(?:change\s+to|use|send\s+to)\s+([a-zA-Z0-9_x]+)/i;
             const vendorMatch = lower.match(changeVendorMatch);
             // Ignore if it matches numbers (meaning it was an amount change, handled above)
-            if (vendorMatch && !/^\d+(?:\.\d+)?$/.test(vendorMatch[1])) {
-                let newVendor = vendorMatch[1];
+            if ((vendorMatch || recipientReplyMatch) && !/^\d+(?:\.\d+)?$/.test((vendorMatch?.[1] || recipientReplyMatch?.[1]) as string)) {
+                let newVendor = (vendorMatch?.[1] || recipientReplyMatch?.[1]) as string;
                 if (newVendor === "same" && session.lastVendor) {
                     newVendor = session.lastVendor;
                 }
@@ -361,7 +402,6 @@ export class IntentParser {
 
         if (session.pendingAction === "collect_intent_details" && session.pendingIntent) {
             const pendingIntent = session.pendingIntent;
-            const amountOnlyMatch = lower.match(/^(\d+(?:\.\d+)?)\s*(?:usdc)?$/i);
 
             if (pendingIntent.action === "create_payment") {
                 if (amountOnlyMatch && pendingIntent.beneficiary) {
@@ -370,6 +410,14 @@ export class IntentParser {
                         action: "create_payment",
                         amount: newAmount,
                         beneficiary: pendingIntent.beneficiary
+                    };
+                }
+
+                if (recipientReplyMatch && pendingIntent.amount !== undefined) {
+                    return {
+                        action: "create_payment",
+                        amount: pendingIntent.amount,
+                        beneficiary: recipientReplyMatch[1]
                     };
                 }
 
@@ -401,6 +449,15 @@ export class IntentParser {
                     };
                 }
 
+                if (recipientReplyMatch && pendingIntent.amount !== undefined && pendingIntent.schedule_time) {
+                    return {
+                        action: "schedule_payment",
+                        amount: pendingIntent.amount,
+                        beneficiary: recipientReplyMatch[1],
+                        schedule_time: pendingIntent.schedule_time
+                    };
+                }
+
                 if ((ethersLikeAddress(lower) || /^[a-zA-Z0-9_]+$/i.test(lower)) && pendingIntent.amount !== undefined && pendingIntent.schedule_time) {
                     return {
                         action: "schedule_payment",
@@ -420,6 +477,39 @@ export class IntentParser {
      */
     private heuristicParse(chatId: number, text: string): ParsedIntent | null {
         const lower = text.toLowerCase().trim();
+
+        if (this.memory) {
+            if (this.matchesAny(lower, [
+                "what next",
+                "what should i do next",
+                "what can i do next",
+                "what now",
+                "what should we do next",
+            ])) {
+                const ctx = this.memory.getContext(chatId);
+                return {
+                    action: "chat",
+                    message: this.getNextStepMessage(ctx.lastAction)
+                };
+            }
+
+            const asksForTodaySummary =
+                (lower.includes("today") || lower.includes("so far")) &&
+                ((lower.includes("what did we do")) ||
+                 (lower.includes("what have we done")) ||
+                 (lower.includes("what did i do")) ||
+                 (lower.includes("what have i done")) ||
+                 (lower.includes("what happened")) ||
+                 (lower.includes("what did we work on")));
+
+            if (asksForTodaySummary) {
+                const summary = this.memory.summarizeToday(chatId);
+                return {
+                    action: "chat",
+                    message: summary || "We haven't completed any recorded actions today yet. Ask me to create a wallet, send a payment, analyze an invoice, or schedule something."
+                };
+            }
+        }
 
         // ── Memory Context Check: Advanced Conversational Intents ──
         if (this.memoryStore) {
@@ -644,6 +734,38 @@ Here's what I can do:
 👛 *Wallet* — "create wallet" or "my wallet"
 
 Type /help for the full command list!`;
+    }
+
+    private getNextStepMessage(lastAction?: string): string {
+        switch (lastAction) {
+            case "create_wallet":
+                return "Your wallet is ready. Next, you can save a vendor with `save vendor jack 0x...` or check `wallet balance`.";
+            case "show_wallet":
+            case "wallet_intelligence":
+            case "status":
+                return "Next, you can save a vendor, send a payment, or ask for `payment history`.";
+            case "save_vendor":
+            case "list_vendors":
+            case "vendor_detail":
+            case "top_vendors":
+                return "Next, you can pay a saved vendor with `send 5 usdc to jack` or create a schedule.";
+            case "analyze_invoice":
+                return "If the invoice looks correct, you can say `pay that invoice` or save the vendor first.";
+            case "create_payment":
+                return "Next, you can confirm the payment, update the amount, or cancel it.";
+            case "schedule_payment":
+            case "list_schedules":
+                return "Next, you can review schedules with `list schedules` or cancel one with `cancel schedule <id>`.";
+            case "payment_history":
+            case "show_recent_payments":
+            case "show_pending_payments":
+            case "report":
+            case "monthly_spending":
+            case "spending_by_vendor":
+                return "Next, you can ask for another report, check your wallet, or send a payment.";
+            default:
+                return "You can create a wallet, save a vendor, send a payment, analyze an invoice, or schedule a payment. Type /help for examples.";
+        }
     }
 
     /**
