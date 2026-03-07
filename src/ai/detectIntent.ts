@@ -9,6 +9,16 @@ export interface DetectedIntent {
     message?: string;
 }
 
+function extractEntity(match: RegExpMatchArray, ...indexes: number[]): string {
+    for (const index of indexes) {
+        const value = match[index];
+        if (value) {
+            return value.trim();
+        }
+    }
+    return "";
+}
+
 const TIME_EXPRESSION = "((?:(?:after|in)\\s+)?\\d+\\s*(?:second|seconds|minute|minutes|hour|hours|day|days|week|weeks)|(?:tomorrow|today)(?:\\s+\\d{1,2}:\\d{2})?|next\\s+(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)(?:\\s+\\d{1,2}:\\d{2})?)";
 
 export function detectIntent(text: string): DetectedIntent | null {
@@ -23,6 +33,11 @@ export function detectIntent(text: string): DetectedIntent | null {
     const walletBalancePattern = /^wallet\s+balance$/i;
     if (walletBalancePattern.test(text)) {
         return { action: "wallet_intelligence" };
+    }
+
+    const accountSummaryPattern = /^(?:(?:show|get|check)\s+)?(?:my\s+)?(?:account\s+summary|account\s+overview|dashboard)$/i;
+    if (accountSummaryPattern.test(text)) {
+        return { action: "account_summary" };
     }
 
     const explicitSchedulePattern = new RegExp(
@@ -85,10 +100,10 @@ export function detectIntent(text: string): DetectedIntent | null {
         };
     }
 
-    const sendPattern1 = /^send\s+(\d+(?:\.\d+)?)\s+usd[c]?\s+(?:to\s+)?([a-zA-Z0-9_x]+)$/i;
+    const sendPattern1 = /^send\s+(\d+(?:\.\d+)?)\s+usd[c]?\s+(?:to\s+)?(?:"([^"]+)"|(.+))$/i;
     const send1Match = text.match(sendPattern1);
     if (send1Match) {
-        return { action: "create_payment", amount: parseFloat(send1Match[1]), beneficiary: send1Match[2] };
+        return { action: "create_payment", amount: parseFloat(send1Match[1]), beneficiary: extractEntity(send1Match, 2, 3) };
     }
 
     const sendPattern2 = /^(0[xX][a-fA-F0-9]{40})\s+send\s+(\d+(?:\.\d+)?)\s+usd[c]?$/i;
@@ -97,16 +112,16 @@ export function detectIntent(text: string): DetectedIntent | null {
         return { action: "create_payment", amount: parseFloat(send2Match[2]), beneficiary: send2Match[1] };
     }
 
-    const payPattern = /^pay\s+(\d+(?:\.\d+)?)\s+usd[c]?\s+(?:to\s+)?([a-zA-Z0-9_x]+)$/i;
+    const payPattern = /^pay\s+(\d+(?:\.\d+)?)\s+usd[c]?\s+(?:to\s+)?(?:"([^"]+)"|(.+))$/i;
     const payMatch = text.match(payPattern);
     if (payMatch) {
-        return { action: "create_payment", amount: parseFloat(payMatch[1]), beneficiary: payMatch[2] };
+        return { action: "create_payment", amount: parseFloat(payMatch[1]), beneficiary: extractEntity(payMatch, 2, 3) };
     }
 
-    const transferPattern = /^transfer\s+(\d+(?:\.\d+)?)\s+usd[c]?\s+(?:to\s+)?([a-zA-Z0-9_x]+)$/i;
+    const transferPattern = /^transfer\s+(\d+(?:\.\d+)?)\s+usd[c]?\s+(?:to\s+)?(?:"([^"]+)"|(.+))$/i;
     const transferMatch = text.match(transferPattern);
     if (transferMatch) {
-        return { action: "create_payment", amount: parseFloat(transferMatch[1]), beneficiary: transferMatch[2] };
+        return { action: "create_payment", amount: parseFloat(transferMatch[1]), beneficiary: extractEntity(transferMatch, 2, 3) };
     }
 
     const sendAmountOnlyPattern = /^(?:send|pay|transfer)\s+(\d+(?:\.\d+)?)\s*(?:usd|usdc)?$/i;

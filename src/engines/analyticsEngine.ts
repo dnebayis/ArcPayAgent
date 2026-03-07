@@ -100,11 +100,11 @@ export class AnalyticsEngine {
         const recent = this.paymentLogs.getRecentPayments(chatId, limit);
 
         if (recent.length === 0) {
-            this.bot.sendMessage(chatId, "📜 No payment history yet.");
+            this.bot.sendMessage(chatId, "📜 No payment history yet.\n\nOnce you send a payment, it will appear here.");
             return;
         }
 
-        let msg = `📜 **Recent Payments** (last ${recent.length})\n\n`;
+        let msg = `📜 **Payment History** (last ${recent.length})\n\n`;
 
         for (const p of recent.reverse()) {
             const date = new Date(p.timestamp);

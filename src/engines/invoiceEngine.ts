@@ -1,4 +1,5 @@
 import TelegramBot from "node-telegram-bot-api";
+import { ethers } from "ethers";
 import { InvoiceStore } from "../storage/invoiceStore";
 import { VendorStore } from "../storage/vendorStore";
 import { RiskEngine, RiskResult } from "./riskEngine";
@@ -111,6 +112,61 @@ export class InvoiceEngine {
         }
 
         return lines;
+    }
+
+    private resolveInvoiceVendor(chatId: number, extracted: ExtractedInvoice): { label: string; resolvedAddress: string | null; canPreparePayment: boolean } {
+        const vendorLabel = extracted.vendor || "Unknown Vendor";
+
+        if (ethers.isAddress(vendorLabel)) {
+            return {
+                label: vendorLabel,
+                resolvedAddress: vendorLabel,
+                canPreparePayment: true
+            };
+        }
+
+        const resolvedAddress = extracted.vendor ? this.vendorStore.getVendor(chatId, extracted.vendor) : null;
+        return {
+            label: vendorLabel,
+            resolvedAddress: resolvedAddress || null,
+            canPreparePayment: Boolean(resolvedAddress)
+        };
+    }
+
+    private buildNextStepLines(chatId: number, extracted: ExtractedInvoice, risk: RiskResult | null, canPreparePayment: boolean): string[] {
+        if (!this.getSettlementAmount(extracted)) {
+            return [
+                "Next step:",
+                "• Retry later when FX conversion is available, or send the payment manually."
+            ];
+        }
+
+        if (!canPreparePayment && extracted.vendor) {
+            return [
+                "Next step:",
+                `• Save this vendor first, then ask me to prepare the payment.`,
+                `• Example: save vendor "${extracted.vendor}" 0x...`
+            ];
+        }
+
+        if (risk?.level === "REVIEW") {
+            return [
+                "Next step:",
+                "• Review the flags below, then prepare the payment if everything looks right."
+            ];
+        }
+
+        if (risk?.level === "HIGH_RISK") {
+            return [
+                "Next step:",
+                "• Review the risk flags carefully before overriding this payment."
+            ];
+        }
+
+        return [
+            "Next step:",
+            "• Prepare the payment if the invoice details look correct."
+        ];
     }
 
     private normalizeAmountValue(raw: string): string {
@@ -368,12 +424,17 @@ export class InvoiceEngine {
         }
 
         if (!this.getSettlementAmount(extracted)) {
+            const vendorInfo = this.resolveInvoiceVendor(chatId, extracted);
             let message = `📄 Invoice summary\n\n`;
-            message += `Vendor: **${extracted.vendor}**\n`;
+            message += `Vendor: **${vendorInfo.label}**\n`;
+            if (vendorInfo.resolvedAddress) {
+                message += `Resolved address: \`${vendorInfo.resolvedAddress}\`\n`;
+            }
             message += `${this.buildInvoiceAmountLines(extracted).join("\n")}\n`;
             if (extracted.invoiceNumber) message += `Invoice #: ${extracted.invoiceNumber}\n`;
             if (extracted.date) message += `Date: ${extracted.date}\n`;
-            message += `\n⚠️ FX conversion is unavailable right now, so I won't prepare this payment automatically.`;
+            message += `\n⚠️ FX conversion is unavailable right now, so I won't prepare this payment automatically.\n\n`;
+            message += this.buildNextStepLines(chatId, extracted, null, vendorInfo.canPreparePayment).join("\n");
 
             this.bot.sendMessage(chatId, message, { parse_mode: "Markdown" });
             return;
@@ -389,52 +450,62 @@ export class InvoiceEngine {
 
         if (risk.level === "HIGH_RISK") {
             // Block payment — show risk details
+            const vendorInfo = this.resolveInvoiceVendor(chatId, extracted);
             let message = `📄 Invoice summary\n\n`;
-            message += `Vendor: **${extracted.vendor}**\n`;
+            message += `Vendor: **${vendorInfo.label}**\n`;
+            if (vendorInfo.resolvedAddress) {
+                message += `Resolved address: \`${vendorInfo.resolvedAddress}\`\n`;
+            }
             message += `${this.buildInvoiceAmountLines(extracted).join("\n")}\n`;
             if (extracted.invoiceNumber) message += `Invoice #: ${extracted.invoiceNumber}\n`;
+            if (extracted.date) message += `Date: ${extracted.date}\n`;
             message += RiskEngine.formatRiskMessage(risk);
-            message += `\n\n🚫 Payment blocked due to high risk.`;
+            message += `\n\n🚫 Payment blocked due to high risk.\n\n`;
+            message += this.buildNextStepLines(chatId, extracted, risk, vendorInfo.canPreparePayment).join("\n");
 
             this.bot.sendMessage(chatId, message, {
                 parse_mode: "Markdown",
-                reply_markup: {
-                    inline_keyboard: [
-                        [
-                            { text: "⚠️ Override & Pay", callback_data: `invpay_${chatId}` },
-                            { text: "Cancel", callback_data: `invcancel_${chatId}` }
+                ...(vendorInfo.canPreparePayment ? {
+                    reply_markup: {
+                        inline_keyboard: [
+                            [
+                                { text: "⚠️ Override & Pay", callback_data: `invpay_${chatId}` },
+                                { text: "Cancel", callback_data: `invcancel_${chatId}` }
+                            ]
                         ]
-                    ]
-                }
+                    }
+                } : {})
             });
             return;
         }
 
         if (risk.level === "REVIEW") {
             // Show warning but allow payment
-            let vendorResolved = "";
-            if (extracted.vendor) {
-                const addr = this.vendorStore.getVendor(chatId, extracted.vendor);
-                if (addr) vendorResolved = `\n→ Resolved: \`${addr}\``;
-            }
+            const vendorInfo = this.resolveInvoiceVendor(chatId, extracted);
 
             let message = `📄 Invoice summary\n\n`;
-            message += `Vendor: **${extracted.vendor}**${vendorResolved}\n`;
+            message += `Vendor: **${vendorInfo.label}**\n`;
+            if (vendorInfo.resolvedAddress) {
+                message += `Resolved address: \`${vendorInfo.resolvedAddress}\`\n`;
+            }
             message += `${this.buildInvoiceAmountLines(extracted).join("\n")}\n`;
             if (extracted.invoiceNumber) message += `Invoice #: ${extracted.invoiceNumber}\n`;
             if (extracted.date) message += `Date: ${extracted.date}\n`;
             message += RiskEngine.formatRiskMessage(risk);
+            message += `\n\n${this.buildNextStepLines(chatId, extracted, risk, vendorInfo.canPreparePayment).join("\n")}`;
 
             this.bot.sendMessage(chatId, message, {
                 parse_mode: "Markdown",
-                reply_markup: {
-                    inline_keyboard: [
-                        [
-                            { text: "Prepare Payment", callback_data: `invpay_${chatId}` },
-                            { text: "Cancel", callback_data: `invcancel_${chatId}` }
+                ...(vendorInfo.canPreparePayment ? {
+                    reply_markup: {
+                        inline_keyboard: [
+                            [
+                                { text: "Prepare Payment", callback_data: `invpay_${chatId}` },
+                                { text: "Cancel", callback_data: `invcancel_${chatId}` }
+                            ]
                         ]
-                    ]
-                }
+                    }
+                } : {})
             });
             return;
         }
@@ -447,34 +518,33 @@ export class InvoiceEngine {
      * Step 5 — Display extraction results and offer payment buttons
      */
     async suggestPayment(chatId: number, extracted: ExtractedInvoice): Promise<void> {
-        let vendorResolved = "";
-
-        if (extracted.vendor) {
-            const addr = this.vendorStore.getVendor(chatId, extracted.vendor);
-            if (addr) {
-                vendorResolved = `\n→ Resolved: \`${addr}\``;
-            }
-        }
+        const vendorInfo = this.resolveInvoiceVendor(chatId, extracted);
 
         this._pendingInvoice[chatId.toString()] = extracted;
 
         let message = `📄 Invoice summary\n\n`;
-        message += `Vendor: **${extracted.vendor}**${vendorResolved}\n`;
+        message += `Vendor: **${vendorInfo.label}**\n`;
+        if (vendorInfo.resolvedAddress) {
+            message += `Resolved address: \`${vendorInfo.resolvedAddress}\`\n`;
+        }
         message += `${this.buildInvoiceAmountLines(extracted).join("\n")}\n`;
         if (extracted.invoiceNumber) message += `Invoice #: ${extracted.invoiceNumber}\n`;
         if (extracted.date) message += `Date: ${extracted.date}\n`;
-        message += `\n✅ Risk check passed`;
+        message += `\n✅ Risk check passed\n\n`;
+        message += this.buildNextStepLines(chatId, extracted, null, vendorInfo.canPreparePayment).join("\n");
 
         this.bot.sendMessage(chatId, message, {
             parse_mode: "Markdown",
-            reply_markup: {
-                inline_keyboard: [
-                    [
-                        { text: "Prepare Payment", callback_data: `invpay_${chatId}` },
-                        { text: "Cancel", callback_data: `invcancel_${chatId}` }
+            ...(vendorInfo.canPreparePayment ? {
+                reply_markup: {
+                    inline_keyboard: [
+                        [
+                            { text: "Prepare Payment", callback_data: `invpay_${chatId}` },
+                            { text: "Cancel", callback_data: `invcancel_${chatId}` }
+                        ]
                     ]
-                ]
-            }
+                }
+            } : {})
         });
     }
 

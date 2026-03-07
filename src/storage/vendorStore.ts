@@ -62,9 +62,35 @@ export class VendorStore {
         saveStore(VENDOR_FILE, this.store);
     }
 
+    private normalizeVendorName(name: string): string {
+        return name
+            .toLowerCase()
+            .trim()
+            .replace(/['"`]/g, "")
+            .replace(/[^a-z0-9]+/g, " ")
+            .trim();
+    }
+
+    private findVendorEntry(chatId: string | number, name: string): [string, VendorData] | null {
+        const id = chatId.toString();
+        const vendors = this.store[id]?.vendors || {};
+        const requested = this.normalizeVendorName(name);
+
+        for (const [storedName, data] of Object.entries(vendors)) {
+            if (storedName === name.toLowerCase()) {
+                return [storedName, data];
+            }
+            if (this.normalizeVendorName(storedName) === requested) {
+                return [storedName, data];
+            }
+        }
+
+        return null;
+    }
+
     saveVendor(chatId: string | number, name: string, address: string): void {
         const id = chatId.toString();
-        const vendorName = name.toLowerCase();
+        const vendorName = this.normalizeVendorName(name);
 
         if (!this.store[id]) {
             this.store[id] = { vendors: {} };
@@ -83,17 +109,13 @@ export class VendorStore {
     }
 
     getVendor(chatId: string | number, name: string): string | null {
-        const id = chatId.toString();
-        const vendorName = name.toLowerCase();
-        const vendor = this.store[id]?.vendors?.[vendorName];
-        if (!vendor) return null;
-        return vendor.address;
+        const entry = this.findVendorEntry(chatId, name);
+        return entry ? entry[1].address : null;
     }
 
     getVendorData(chatId: string | number, name: string): VendorData | null {
-        const id = chatId.toString();
-        const vendorName = name.toLowerCase();
-        return this.store[id]?.vendors?.[vendorName] || null;
+        const entry = this.findVendorEntry(chatId, name);
+        return entry ? entry[1] : null;
     }
 
     getVendors(chatId: string | number): Record<string, string> | null {
@@ -133,13 +155,12 @@ export class VendorStore {
      */
     recordPayment(chatId: string | number, vendorName: string, amount: number): void {
         const id = chatId.toString();
-        const name = vendorName.toLowerCase();
+        const entry = this.findVendorEntry(chatId, vendorName);
+        if (!entry || !this.store[id]?.vendors?.[entry[0]]) return;
 
-        if (!this.store[id]?.vendors?.[name]) return;
-
-        this.store[id].vendors[name].totalPaid += amount;
-        this.store[id].vendors[name].invoiceCount += 1;
-        this.store[id].vendors[name].lastPayment = Date.now();
+        this.store[id].vendors[entry[0]].totalPaid += amount;
+        this.store[id].vendors[entry[0]].invoiceCount += 1;
+        this.store[id].vendors[entry[0]].lastPayment = Date.now();
         this.persist();
     }
 
@@ -148,23 +169,22 @@ export class VendorStore {
      */
     recordInvoice(chatId: string | number, vendorName: string): void {
         const id = chatId.toString();
-        const name = vendorName.toLowerCase();
+        const entry = this.findVendorEntry(chatId, vendorName);
+        if (!entry || !this.store[id]?.vendors?.[entry[0]]) return;
 
-        if (!this.store[id]?.vendors?.[name]) return;
-
-        this.store[id].vendors[name].lastInvoice = Date.now();
+        this.store[id].vendors[entry[0]].lastInvoice = Date.now();
         this.persist();
     }
 
     removeVendor(chatId: string | number, name: string): boolean {
         const id = chatId.toString();
-        const vendorName = name.toLowerCase();
+        const entry = this.findVendorEntry(chatId, name);
 
-        if (!this.store[id] || !this.store[id].vendors[vendorName]) {
+        if (!this.store[id] || !entry) {
             return false;
         }
 
-        delete this.store[id].vendors[vendorName];
+        delete this.store[id].vendors[entry[0]];
         this.persist();
         return true;
     }

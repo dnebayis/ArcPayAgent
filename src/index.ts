@@ -215,6 +215,27 @@ ${rows.join("\n")}`,
         }
     };
 
+    const buildAccountSummaryMessage = async (chatId: number): Promise<string> => {
+        const address = walletStore.getWalletAddress(chatId);
+        const vendorCount = Object.keys(vendorStore.getVendorsWithStats(chatId) || {}).length;
+        const activeSchedules = scheduleStore.getSchedules(chatId).length;
+        const recentPayments = paymentLogStore.getRecentPayments(chatId, 1);
+        const spent30d = analyticsEngine.getTotalSpending(chatId, Date.now() - 30 * 24 * 60 * 60 * 1000);
+
+        if (!address) {
+            return "🏦 **Account Summary**\n\nWallet: Not set up\nSaved vendors: **0**\nActive schedules: **0**\nRecorded payments: **0**\n\nNext: create your wallet with `create wallet`.";
+        }
+
+        const rawUsdcBalance = await usdc.balanceOf(address).catch(() => 0n);
+        const balance = ethers.formatUnits(rawUsdcBalance, 6);
+        const recentPayment = recentPayments[0];
+        const recentPaymentLine = recentPayment
+            ? `Last payment: **${recentPayment.amount} USDC** → ${recentPayment.vendor || `${recentPayment.address.slice(0, 8)}...`}`
+            : "Last payment: None yet";
+
+        return `🏦 **Account Summary**\n\nAddress: \`${address}\`\nAvailable balance: **${balance} USDC**\nSpent in the last 30 days: **${spent30d} USDC**\nSaved vendors: **${vendorCount}**\nActive schedules: **${activeSchedules}**\n${recentPaymentLine}\n\nTry \`wallet balance\`, \`payment history\`, or \`list schedules\`.`;
+    };
+
     if (!token && !isTest) {
         console.error("[Bot] TELEGRAM_TOKEN is missing. Telegram polling is disabled.");
     }
@@ -412,6 +433,11 @@ ${rows.join("\n")}`,
         analyticsEngine.showMonthlyBreakdown(chatId);
     });
 
+    registry.register("account_summary", "Show account summary", async (chatId) => {
+        const msg = await buildAccountSummaryMessage(chatId);
+        bot.sendMessage(chatId, msg, { parse_mode: "Markdown" });
+    });
+
 
 
     registry.register("wallet_intelligence", "Check Circle Wallet intelligence", async (chatId) => {
@@ -447,7 +473,7 @@ ${rows.join("\n")}`,
 
             let msg = `🔐 **Wallet Status (Arc Testnet)**\n\n`;
             msg += `Address: \`${address}\`\n`;
-            msg += `Balance: **${arcUsdcBalance} USDC**\n`;
+            msg += `Available balance: **${arcUsdcBalance} USDC**\n`;
             msg += `Transactions this week: **${recentCount}**\n\n`;
 
             msg += `_Connected transparently to Arc Network._`;

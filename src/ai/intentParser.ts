@@ -25,6 +25,16 @@ export interface ParsedIntent {
     needsClarification?: boolean;
 }
 
+function extractEntity(match: RegExpMatchArray, ...indexes: number[]): string {
+    for (const index of indexes) {
+        const value = match[index];
+        if (value) {
+            return value.trim();
+        }
+    }
+    return "";
+}
+
 export class IntentParser {
     constructor(
         private llmKeyStore?: LLMKeyStore,
@@ -139,6 +149,9 @@ export class IntentParser {
         const walletBalancePattern = /^wallet\s+balance$/i;
         if (walletBalancePattern.test(text)) return { action: "wallet_intelligence" };
 
+        const accountSummaryPattern = /^(?:(?:show|get|check)\s+)?(?:my\s+)?(?:account\s+summary|account\s+overview|dashboard)$/i;
+        if (accountSummaryPattern.test(text)) return { action: "account_summary" };
+
         // schedule payment 1 usdc to jack 10 seconds
         const explicitSchedulePattern = new RegExp(
             `^schedule\\s+payment\\s+(\\d+(?:\\.\\d+)?)\\s+usdc\\s+(?:to\\s+)?(0[xX][a-fA-F0-9]{40}|[a-zA-Z0-9_]+)\\s+${timeExpression}$`,
@@ -180,9 +193,9 @@ export class IntentParser {
         }
 
         // send 1 usdc jack | send 5 usdc to 0xabc
-        const sendPattern1 = /^send\s+(\d+(?:\.\d+)?)\s+usdc\s+(?:to\s+)?([a-zA-Z0-9_x]+)/i;
+        const sendPattern1 = /^send\s+(\d+(?:\.\d+)?)\s+usdc\s+(?:to\s+)?(?:"([^"]+)"|(.+))$/i;
         const m1 = text.match(sendPattern1);
-        if (m1) return { action: "create_payment", amount: parseFloat(m1[1]), beneficiary: m1[2] };
+        if (m1) return { action: "create_payment", amount: parseFloat(m1[1]), beneficiary: extractEntity(m1, 2, 3) };
 
         // 0xabc... send 1 usdc
         const sendPattern2 = /^(0[xX][a-fA-F0-9]{40})\s+send\s+(\d+(?:\.\d+)?)\s+usdc$/i;
@@ -190,14 +203,14 @@ export class IntentParser {
         if (m2) return { action: "create_payment", amount: parseFloat(m2[2]), beneficiary: m2[1] };
 
         // pay 10 usdc to jack
-        const payPattern = /^pay\s+(\d+(?:\.\d+)?)\s+usdc\s+(?:to\s+)?([a-zA-Z0-9_x]+)/i;
+        const payPattern = /^pay\s+(\d+(?:\.\d+)?)\s+usdc\s+(?:to\s+)?(?:"([^"]+)"|(.+))$/i;
         const mp = text.match(payPattern);
-        if (mp) return { action: "create_payment", amount: parseFloat(mp[1]), beneficiary: mp[2] };
+        if (mp) return { action: "create_payment", amount: parseFloat(mp[1]), beneficiary: extractEntity(mp, 2, 3) };
 
         // transfer 5 usdc to jack
-        const transferPattern = /^transfer\s+(\d+(?:\.\d+)?)\s+usdc\s+(?:to\s+)?([a-zA-Z0-9_x]+)/i;
+        const transferPattern = /^transfer\s+(\d+(?:\.\d+)?)\s+usdc\s+(?:to\s+)?(?:"([^"]+)"|(.+))$/i;
         const mt = text.match(transferPattern);
-        if (mt) return { action: "create_payment", amount: parseFloat(mt[1]), beneficiary: mt[2] };
+        if (mt) return { action: "create_payment", amount: parseFloat(mt[1]), beneficiary: extractEntity(mt, 2, 3) };
 
         const sendAmountOnly = /^(?:send|pay|transfer)\s+(\d+(?:\.\d+)?)\s*(?:usdc)?$/i;
         const mAmountOnly = text.match(sendAmountOnly);
@@ -209,9 +222,9 @@ export class IntentParser {
         if (mNoAmt1 && !/^\d+(?:\.\d+)?$/.test(mNoAmt1[1])) return { action: "create_payment", beneficiary: mNoAmt1[1] };
 
         // save vendor jack 0xabc...
-        const vendorPattern = /^(?:save|add)\s+vendor\s+([a-zA-Z0-9_]+)\s+(0[xX][a-fA-F0-9]{40})/i;
+        const vendorPattern = /^(?:save|add)\s+vendor\s+(?:"([^"]+)"|([a-zA-Z0-9_]+))\s+(0[xX][a-fA-F0-9]{40})/i;
         const mv = text.match(vendorPattern);
-        if (mv) return { action: "save_vendor", name: mv[1], address: mv[2] };
+        if (mv) return { action: "save_vendor", name: mv[1] || mv[2], address: mv[3] };
 
         // create payment request 20 usdc | request 5 usdc
         const reqPattern = /^(?:create\s+)?(?:payment\s+)?request\s+(\d+(?:\.\d+)?)\s+usdc/i;
@@ -219,18 +232,18 @@ export class IntentParser {
         if (mr) return { action: "create_payment_request", amount: parseFloat(mr[1]) };
 
         // remove vendor jack | delete vendor jack
-        const removeVendorPattern = /^(?:remove|delete)\s+vendor\s+([a-zA-Z0-9_]+)/i;
+        const removeVendorPattern = /^(?:remove|delete)\s+vendor\s+(?:"([^"]+)"|(.+))$/i;
         const mrv = text.match(removeVendorPattern);
-        if (mrv) return { action: "remove_vendor", name: mrv[1] };
+        if (mrv) return { action: "remove_vendor", name: (mrv[1] || mrv[2]).trim() };
 
         // remove all vendors | delete all vendors | clear vendors
         const removeAllPattern = /^(?:remove|delete|clear)\s+all\s+vendors?/i;
         if (removeAllPattern.test(text)) return { action: "remove_all_vendors" };
 
         // vendor aws | vendor detail jack
-        const vendorDetailPattern = /^vendor\s+(?:detail\s+)?([a-zA-Z0-9_]+)/i;
+        const vendorDetailPattern = /^vendor\s+(?:detail\s+)?(?:"([^"]+)"|(.+))$/i;
         const mvd = text.match(vendorDetailPattern);
-        if (mvd) return { action: "vendor_detail", name: mvd[1] };
+        if (mvd) return { action: "vendor_detail", name: (mvd[1] || mvd[2]).trim() };
 
         // top vendors
         const topVendorsPattern = /^top\s+vendors?/i;
@@ -654,6 +667,12 @@ export class IntentParser {
             return { action: "wallet_intelligence" };
         }
 
+        if (this.matchesAny(lower, [
+            "account summary", "account overview", "dashboard", "show dashboard", "show account summary"
+        ])) {
+            return { action: "account_summary" };
+        }
+
         // ── Status / fallback (if not specific to wallet intelligence) ──
         if (this.matchesAny(lower, [
             "status", "account", "my status", "account status",
@@ -956,6 +975,8 @@ Type /help for the full command list!`;
                 return ["Get wallet address", "Scan records", "List recent transactions"];
             case "wallet_intelligence":
                 return ["Find wallet", "Read balance and recent tx", "Send concise summary"];
+            case "account_summary":
+                return ["Read wallet", "Aggregate recent account metrics", "Send concise account overview"];
             case "report":
                 return ["Get wallet address", "Aggregate spending", "Summarize by vendor/time"];
             case "status":
