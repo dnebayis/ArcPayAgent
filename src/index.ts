@@ -217,10 +217,13 @@ ${rows.join("\n")}`,
 
     const buildAccountSummaryMessage = async (chatId: number): Promise<string> => {
         const address = walletStore.getWalletAddress(chatId);
-        const vendorCount = Object.keys(vendorStore.getVendorsWithStats(chatId) || {}).length;
+        const vendors = vendorStore.getVendorsWithStats(chatId) || {};
+        const vendorCount = Object.keys(vendors).length;
         const activeSchedules = scheduleStore.getSchedules(chatId).length;
-        const recentPayments = paymentLogStore.getRecentPayments(chatId, 1);
+        const recentPayments = paymentLogStore.getRecentPayments(chatId, 3);
+        const recordedPayments = paymentLogStore.getPayments(chatId).length;
         const spent30d = analyticsEngine.getTotalSpending(chatId, Date.now() - 30 * 24 * 60 * 60 * 1000);
+        const topVendor = analyticsEngine.getSpendingByVendor(chatId, Date.now() - 30 * 24 * 60 * 60 * 1000)[0];
 
         if (!address) {
             return "🏦 **Account Summary**\n\nWallet: Not set up\nSaved vendors: **0**\nActive schedules: **0**\nRecorded payments: **0**\n\nNext: create your wallet with `create wallet`.";
@@ -228,12 +231,15 @@ ${rows.join("\n")}`,
 
         const rawUsdcBalance = await usdc.balanceOf(address).catch(() => 0n);
         const balance = ethers.formatUnits(rawUsdcBalance, 6);
-        const recentPayment = recentPayments[0];
-        const recentPaymentLine = recentPayment
-            ? `Last payment: **${recentPayment.amount} USDC** → ${recentPayment.vendor || `${recentPayment.address.slice(0, 8)}...`}`
+        const lastPayment = recentPayments[recentPayments.length - 1];
+        const lastPaymentLine = lastPayment
+            ? `Last payment: **${lastPayment.amount} USDC** → ${lastPayment.vendor || `${lastPayment.address.slice(0, 8)}...`}`
             : "Last payment: None yet";
+        const topVendorLine = topVendor
+            ? `Top vendor (30d): **${topVendor.vendor}** — ${topVendor.total} USDC`
+            : "Top vendor (30d): None yet";
 
-        return `🏦 **Account Summary**\n\nAddress: \`${address}\`\nAvailable balance: **${balance} USDC**\nSpent in the last 30 days: **${spent30d} USDC**\nSaved vendors: **${vendorCount}**\nActive schedules: **${activeSchedules}**\n${recentPaymentLine}\n\nTry \`wallet balance\`, \`payment history\`, or \`list schedules\`.`;
+        return `🏦 **Account Summary**\n\nAddress: \`${address}\`\nAvailable balance: **${balance} USDC**\nSpent in the last 30 days: **${spent30d} USDC**\nRecorded payments: **${recordedPayments}**\nSaved vendors: **${vendorCount}**\nActive schedules: **${activeSchedules}**\n${topVendorLine}\n${lastPaymentLine}\n\nTry \`wallet balance\`, \`payment history\`, or \`list schedules\`.`;
     };
 
     if (!token && !isTest) {

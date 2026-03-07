@@ -104,7 +104,10 @@ export class AnalyticsEngine {
             return;
         }
 
-        let msg = `📜 **Payment History** (last ${recent.length})\n\n`;
+        const total = recent.reduce((sum, payment) => sum + payment.amount, 0);
+        let msg = `📜 **Payment History**\n\n`;
+        msg += `Entries shown: **${recent.length}**\n`;
+        msg += `Total in view: **${total} USDC**\n\n`;
 
         for (const p of recent.reverse()) {
             const date = new Date(p.timestamp);

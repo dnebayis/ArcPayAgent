@@ -29,21 +29,25 @@ export function setupHandlers(
 *Wallet*
 • \`create wallet\` — Create your wallet
 • \`show wallet\` — Show your wallet address
-• \`wallet balance\` — Show balance and explorer activity
+• \`wallet balance\` — Show live balance and recent chain activity
+• \`account summary\` — Show your account overview
 • \`status\` — Show account status
 • \`export wallet\` — Show wallet export details
 
 *Payments*
 • \`send 5 usdc to jack\` — Send to a saved vendor
+• \`send 5 usdc to "Anthropic, PBC"\` — Send to a multi-word vendor
 • \`send 5 usdc to 0x...\` — Send to a wallet address
 • \`request 20 usdc\` — Create a payment link
+• \`payment history\` — Show recent payments
 
-*Vendors*
+*Address Book*
 • \`save vendor jack 0x...\` — Save a vendor
+• \`save vendor "Anthropic, PBC" 0x...\` — Save a multi-word vendor
 • \`my vendors\` — List saved vendors
-• \`vendor jack\` — Show vendor details
+• \`vendor "Anthropic, PBC"\` — Show vendor details
 • \`top vendors\` — Show top vendors
-• \`remove vendor jack\` — Remove one vendor
+• \`remove vendor "Anthropic, PBC"\` — Remove one vendor
 
 *Invoices*
 • Send a PDF or photo invoice
@@ -55,8 +59,7 @@ export function setupHandlers(
 • \`list schedules\` — List active schedules
 • \`cancel schedule <id>\` — Cancel a schedule
 
-*History & Reports*
-• \`payment history\` — Show recent payments
+*Reports*
 • \`show recent payments\` — Show router activity
 • \`show pending payments\` — Show pending router status
 • \`report\` — Show spending summary
@@ -168,6 +171,7 @@ ArcPay helps you manage wallets, vendors, payments, invoices, and schedules on A
 *Start here*
 • \`create wallet\`
 • \`show wallet\`
+• \`account summary\`
 • \`save vendor jack 0x...\`
 • \`send 5 usdc to jack\`
 
