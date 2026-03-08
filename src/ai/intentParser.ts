@@ -23,6 +23,19 @@ export interface ParsedIntent {
     rationale?: string;
     safeToExecute?: boolean;
     needsClarification?: boolean;
+    period?: string;
+}
+
+interface LLMAuthConfig {
+    provider: string;
+    key: string;
+    model?: string;
+}
+
+interface OpenAICompatibleConfig {
+    apiUrl: string;
+    model: string;
+    extraHeaders?: Record<string, string>;
 }
 
 function extractEntity(match: RegExpMatchArray, ...indexes: number[]): string {
@@ -151,6 +164,7 @@ export class IntentParser {
 
         const accountSummaryPattern = /^(?:(?:show|get|check)\s+)?(?:my\s+)?(?:account\s+summary|account\s+overview|dashboard)$/i;
         if (accountSummaryPattern.test(text)) return { action: "account_summary" };
+
 
         // schedule payment 1 usdc to jack 10 seconds
         const explicitSchedulePattern = new RegExp(
@@ -806,6 +820,87 @@ Type /help for the full command list!`;
     /**
      * Layer 4 — LLM with full conversation context
      */
+    private getOpenAICompatibleConfig(auth: LLMAuthConfig): OpenAICompatibleConfig {
+        switch (auth.provider) {
+            case "deepseek":
+                return { apiUrl: "https://api.deepseek.com/v1/chat/completions", model: auth.model || "deepseek-chat" };
+            case "groq":
+                return { apiUrl: "https://api.groq.com/openai/v1/chat/completions", model: auth.model || "llama-3.3-70b-versatile" };
+            case "qwen":
+                return { apiUrl: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions", model: auth.model || "qwen3-max" };
+            case "openrouter":
+                return { apiUrl: "https://openrouter.ai/api/v1/chat/completions", model: auth.model || "openai/gpt-4o-mini" };
+            case "together":
+                return { apiUrl: "https://api.together.xyz/v1/chat/completions", model: auth.model || "meta-llama/Llama-3.3-70B-Instruct-Turbo" };
+            case "mistral":
+                return { apiUrl: "https://api.mistral.ai/v1/chat/completions", model: auth.model || "mistral-small-latest" };
+            case "openai":
+            default:
+                return { apiUrl: "https://api.openai.com/v1/chat/completions", model: auth.model || "gpt-4o-mini" };
+        }
+    }
+
+    private async callOpenAICompatibleLLM(auth: LLMAuthConfig, messages: { role: string; content: string }[]): Promise<{ model: string; content: string | undefined } | null> {
+        const config = this.getOpenAICompatibleConfig(auth);
+        const response = await fetch(config.apiUrl, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "Authorization": `Bearer ${auth.key}`,
+                ...(config.extraHeaders || {})
+            },
+            body: JSON.stringify({
+                model: config.model,
+                messages,
+                response_format: { type: "json_object" }
+            })
+        });
+
+        if (!response.ok) {
+            const errorBody = await response.text();
+            console.error(`[LLM] API error ${response.status}: ${errorBody.substring(0, 200)}`);
+            return null;
+        }
+
+        const data = await response.json();
+        return { model: config.model, content: data.choices?.[0]?.message?.content };
+    }
+
+    private async callAnthropicLLM(auth: LLMAuthConfig, systemContent: string, messages: { role: string; content: string }[]): Promise<{ model: string; content: string | undefined } | null> {
+        const model = auth.model || "claude-3-5-sonnet-latest";
+        const anthropicMessages = messages
+            .filter((msg) => msg.role !== "system")
+            .map((msg) => ({
+                role: msg.role === "assistant" ? "assistant" : "user",
+                content: msg.content
+            }));
+
+        const response = await fetch("https://api.anthropic.com/v1/messages", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "x-api-key": auth.key,
+                "anthropic-version": "2023-06-01"
+            },
+            body: JSON.stringify({
+                model,
+                system: `${systemContent}\n\nReturn only valid JSON.`,
+                max_tokens: 800,
+                messages: anthropicMessages
+            })
+        });
+
+        if (!response.ok) {
+            const errorBody = await response.text();
+            console.error(`[LLM] API error ${response.status}: ${errorBody.substring(0, 200)}`);
+            return null;
+        }
+
+        const data = await response.json();
+        const content = data.content?.find((item: any) => item?.type === "text")?.text;
+        return { model, content };
+    }
+
     private async llmFallback(chatId: number, input: string): Promise<ParsedIntent> {
         if (!this.llmKeyStore) {
             return this.buildSmartFallback(chatId, input);
@@ -838,37 +933,14 @@ Type /help for the full command list!`;
 
             messages.push({ role: "user", content: input });
 
-            let apiUrl = "https://api.openai.com/v1/chat/completions";
             let model = auth.model || "gpt-4o-mini";
+            const llmResult = auth.provider === "anthropic"
+                ? await this.callAnthropicLLM(auth, systemContent, messages)
+                : await this.callOpenAICompatibleLLM(auth, messages);
 
-            // Support different providers
-            if (auth.provider === "deepseek") {
-                apiUrl = "https://api.deepseek.com/v1/chat/completions";
-                model = auth.model || "deepseek-chat";
-            } else if (auth.provider === "groq") {
-                apiUrl = "https://api.groq.com/openai/v1/chat/completions";
-                model = auth.model || "llama-3.3-70b-versatile";
-            } else if (auth.provider === "qwen") {
-                apiUrl = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions";
-                model = auth.model || "qwen3-max";
-            }
-
-            const response = await fetch(apiUrl, {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                    "Authorization": `Bearer ${auth.key}`
-                },
-                body: JSON.stringify({
-                    model,
-                    messages,
-                    response_format: { type: "json_object" }
-                })
-            });
-
-            if (response.ok) {
-                const data = await response.json();
-                let content = data.choices?.[0]?.message?.content;
+            if (llmResult) {
+                model = llmResult.model;
+                let content = llmResult.content;
                 if (content) {
                     // Strip markdown json fences (```json ... ```) which LLMs often add
                     content = content.replace(/```json/i, "").replace(/```/g, "").trim();
@@ -899,9 +971,6 @@ Type /help for the full command list!`;
                         console.error("[LLM] JSON parse error:", parseErr, "Content was:", content);
                     }
                 }
-            } else {
-                const errorBody = await response.text();
-                console.error(`[LLM] API error ${response.status}: ${errorBody.substring(0, 200)}`);
             }
         } catch (err) {
             console.error("[LLM] Error:", err);

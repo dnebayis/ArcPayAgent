@@ -246,6 +246,110 @@ describe("IntentParser — Session Context", () => {
     });
 });
 
+describe("IntentParser — LLM provider adapters", () => {
+    it("should call OpenRouter with an OpenAI-compatible endpoint", async () => {
+        const fetchMock = vi.fn().mockResolvedValue({
+            ok: true,
+            json: async () => ({
+                choices: [{ message: { content: JSON.stringify({ action: "greeting" }) } }]
+            })
+        });
+        vi.stubGlobal("fetch", fetchMock);
+
+        const parser = new IntentParser({
+            hasKey: () => true,
+            getKey: () => ({ provider: "openrouter", key: "test-key", model: undefined })
+        } as any);
+
+        const intent = await parser.parse(1, "tell me something");
+        expect(intent.action).toBe("greeting");
+        expect(fetchMock).toHaveBeenCalledWith(
+            "https://openrouter.ai/api/v1/chat/completions",
+            expect.objectContaining({
+                method: "POST",
+                headers: expect.objectContaining({
+                    Authorization: "Bearer test-key"
+                })
+            })
+        );
+        vi.unstubAllGlobals();
+    });
+
+    it("should call Together with an OpenAI-compatible endpoint", async () => {
+        const fetchMock = vi.fn().mockResolvedValue({
+            ok: true,
+            json: async () => ({
+                choices: [{ message: { content: JSON.stringify({ action: "acknowledgment" }) } }]
+            })
+        });
+        vi.stubGlobal("fetch", fetchMock);
+
+        const parser = new IntentParser({
+            hasKey: () => true,
+            getKey: () => ({ provider: "together", key: "test-key", model: undefined })
+        } as any);
+
+        const intent = await parser.parse(1, "tell me something");
+        expect(intent.action).toBe("acknowledgment");
+        expect(fetchMock).toHaveBeenCalledWith(
+            "https://api.together.xyz/v1/chat/completions",
+            expect.objectContaining({ method: "POST" })
+        );
+        vi.unstubAllGlobals();
+    });
+
+    it("should call Mistral with an OpenAI-compatible endpoint", async () => {
+        const fetchMock = vi.fn().mockResolvedValue({
+            ok: true,
+            json: async () => ({
+                choices: [{ message: { content: JSON.stringify({ action: "greeting" }) } }]
+            })
+        });
+        vi.stubGlobal("fetch", fetchMock);
+
+        const parser = new IntentParser({
+            hasKey: () => true,
+            getKey: () => ({ provider: "mistral", key: "test-key", model: undefined })
+        } as any);
+
+        await parser.parse(1, "tell me something");
+        expect(fetchMock).toHaveBeenCalledWith(
+            "https://api.mistral.ai/v1/chat/completions",
+            expect.objectContaining({ method: "POST" })
+        );
+        vi.unstubAllGlobals();
+    });
+
+    it("should call Anthropic with the messages API", async () => {
+        const fetchMock = vi.fn().mockResolvedValue({
+            ok: true,
+            json: async () => ({
+                content: [{ type: "text", text: JSON.stringify({ action: "greeting" }) }]
+            })
+        });
+        vi.stubGlobal("fetch", fetchMock);
+
+        const parser = new IntentParser({
+            hasKey: () => true,
+            getKey: () => ({ provider: "anthropic", key: "test-key", model: undefined })
+        } as any);
+
+        const intent = await parser.parse(1, "tell me something");
+        expect(intent.action).toBe("greeting");
+        expect(fetchMock).toHaveBeenCalledWith(
+            "https://api.anthropic.com/v1/messages",
+            expect.objectContaining({
+                method: "POST",
+                headers: expect.objectContaining({
+                    "x-api-key": "test-key",
+                    "anthropic-version": "2023-06-01"
+                })
+            })
+        );
+        vi.unstubAllGlobals();
+    });
+});
+
 describe("IntentParser — Advanced NLP Memory Context", () => {
     it("should resolve 'send jack the usual amount'", async () => {
         const memoryStore = new MemoryStore("/dev/null/false.json"); // Provide dummy path

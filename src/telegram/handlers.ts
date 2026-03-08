@@ -54,6 +54,12 @@ export function setupHandlers(
 • \`analyze invoice\` — Ask for invoice extraction
 • \`pay that invoice\` — Use the last analyzed invoice
 
+*LLM*
+• \`/llmkey status\` — Show your saved LLM provider
+• \`/llmkey set openai sk-...\` — Save your own API key
+• \`/llmkey model gpt-4.1-mini\` — Set your preferred model
+• \`/llmkey remove\` — Remove your saved API key
+
 *Schedules*
 • \`schedule payment 10 usdc to aws tomorrow\` — Create a schedule
 • \`list schedules\` — List active schedules
@@ -179,6 +185,7 @@ ArcPay helps you manage wallets, vendors, payments, invoices, and schedules on A
 • Send a PDF or photo invoice
 • \`request 20 usdc\`
 • \`schedule payment 10 usdc to aws tomorrow\`
+• \`/llmkey set openai sk-...\`
 
 Type \`help\` or \`/help\` to see the full command list.
 
@@ -203,8 +210,54 @@ Only the wallet owner can use payment, request, and schedule action buttons.`;
             return;
         }
 
-        if (text.startsWith("/llmkey")) {
-            bot.sendMessage(chatId, "LLM key commands are currently disabled.");
+        const llmKeyMatch = originalText.match(/^\/llmkey(?:\s+(.+))?$/i);
+        if (llmKeyMatch) {
+            const rawArgs = llmKeyMatch[1]?.trim() || "";
+            const [subcommandRaw, ...rest] = rawArgs.split(/\s+/).filter(Boolean);
+            const subcommand = (subcommandRaw || "status").toLowerCase();
+
+            if (subcommand === "status") {
+                bot.sendMessage(chatId, `🔐 ${llmKeyStore.getStatus(chatId)}`);
+                return;
+            }
+
+            if (subcommand === "remove") {
+                const removed = llmKeyStore.removeKey(chatId);
+                bot.sendMessage(chatId, removed ? "✅ Your saved LLM key was removed." : "No saved LLM key was found for this account.");
+                return;
+            }
+
+            if (subcommand === "model") {
+                const model = rest.join(" ").trim();
+                if (!model) {
+                    bot.sendMessage(chatId, "Usage: `/llmkey model gpt-4.1-mini`", { parse_mode: "Markdown" });
+                    return;
+                }
+
+                const updated = llmKeyStore.setModel(chatId, model);
+                bot.sendMessage(chatId, updated ? `✅ Preferred LLM model set to \`${model}\`.` : "Set your LLM key first with `/llmkey set <provider> <api-key>`.", { parse_mode: "Markdown" });
+                return;
+            }
+
+            if (subcommand === "set") {
+                const provider = rest[0]?.toLowerCase();
+                const apiKey = rest.slice(1).join(" ").trim();
+
+                if (!provider || !apiKey) {
+                    bot.sendMessage(chatId, "Usage: `/llmkey set openai sk-...`", { parse_mode: "Markdown" });
+                    return;
+                }
+
+                llmKeyStore.setKey(chatId, provider, apiKey);
+                bot.sendMessage(chatId, `✅ Saved your LLM key for provider \`${provider}\`.`, { parse_mode: "Markdown" });
+                return;
+            }
+
+            bot.sendMessage(
+                chatId,
+                "Use one of these commands:\n• `/llmkey status`\n• `/llmkey set openai sk-...`\n• `/llmkey model gpt-4.1-mini`\n• `/llmkey remove`",
+                { parse_mode: "Markdown" }
+            );
             return;
         }
 
