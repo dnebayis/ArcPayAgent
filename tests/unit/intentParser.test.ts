@@ -348,6 +348,38 @@ describe("IntentParser — LLM provider adapters", () => {
         );
         vi.unstubAllGlobals();
     });
+
+    it("should call Gemini with the generateContent API", async () => {
+        const fetchMock = vi.fn().mockResolvedValue({
+            ok: true,
+            json: async () => ({
+                candidates: [{
+                    content: {
+                        parts: [{ text: JSON.stringify({ action: "greeting" }) }]
+                    }
+                }]
+            })
+        });
+        vi.stubGlobal("fetch", fetchMock);
+
+        const parser = new IntentParser({
+            hasKey: () => true,
+            getKey: () => ({ provider: "gemini", key: "test-key", model: undefined })
+        } as any);
+
+        const intent = await parser.parse(1, "tell me something");
+        expect(intent.action).toBe("greeting");
+        expect(fetchMock).toHaveBeenCalledWith(
+            "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent",
+            expect.objectContaining({
+                method: "POST",
+                headers: expect.objectContaining({
+                    "x-goog-api-key": "test-key"
+                })
+            })
+        );
+        vi.unstubAllGlobals();
+    });
 });
 
 describe("IntentParser — Advanced NLP Memory Context", () => {

@@ -901,6 +901,43 @@ Type /help for the full command list!`;
         return { model, content };
     }
 
+    private async callGeminiLLM(auth: LLMAuthConfig, systemContent: string, messages: { role: string; content: string }[]): Promise<{ model: string; content: string | undefined } | null> {
+        const model = auth.model || "gemini-2.0-flash";
+        const geminiMessages = messages
+            .filter((msg) => msg.role !== "system")
+            .map((msg) => ({
+                role: msg.role === "assistant" ? "model" : "user",
+                parts: [{ text: msg.content }]
+            }));
+
+        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "x-goog-api-key": auth.key
+            },
+            body: JSON.stringify({
+                systemInstruction: {
+                    parts: [{ text: `${systemContent}\n\nReturn only valid JSON.` }]
+                },
+                contents: geminiMessages,
+                generationConfig: {
+                    responseMimeType: "application/json"
+                }
+            })
+        });
+
+        if (!response.ok) {
+            const errorBody = await response.text();
+            console.error(`[LLM] API error ${response.status}: ${errorBody.substring(0, 200)}`);
+            return null;
+        }
+
+        const data = await response.json();
+        const content = data.candidates?.[0]?.content?.parts?.find((item: any) => typeof item?.text === "string")?.text;
+        return { model, content };
+    }
+
     private async llmFallback(chatId: number, input: string): Promise<ParsedIntent> {
         if (!this.llmKeyStore) {
             return this.buildSmartFallback(chatId, input);
@@ -934,9 +971,14 @@ Type /help for the full command list!`;
             messages.push({ role: "user", content: input });
 
             let model = auth.model || "gpt-4o-mini";
-            const llmResult = auth.provider === "anthropic"
-                ? await this.callAnthropicLLM(auth, systemContent, messages)
-                : await this.callOpenAICompatibleLLM(auth, messages);
+            let llmResult: { model: string; content: string | undefined } | null;
+            if (auth.provider === "anthropic") {
+                llmResult = await this.callAnthropicLLM(auth, systemContent, messages);
+            } else if (auth.provider === "gemini") {
+                llmResult = await this.callGeminiLLM(auth, systemContent, messages);
+            } else {
+                llmResult = await this.callOpenAICompatibleLLM(auth, messages);
+            }
 
             if (llmResult) {
                 model = llmResult.model;
