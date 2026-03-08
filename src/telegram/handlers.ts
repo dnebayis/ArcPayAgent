@@ -200,6 +200,22 @@ Only the wallet owner can use payment, request, and schedule action buttons.`;
             return;
         }
 
+        if (
+            text === "help" ||
+            text === "commands" ||
+            text === "menu" ||
+            text.includes("list commands") ||
+            text.includes("list the commands") ||
+            text.includes("show commands") ||
+            text.includes("command list") ||
+            text.includes("commands in detail") ||
+            text.includes("what are the commands") ||
+            text.includes("what commands can you do")
+        ) {
+            bot.sendMessage(chatId, helpMessage, { parse_mode: "Markdown" });
+            return;
+        }
+
         if (text === "/health" || text === "/ready") {
             const endpoint = text === "/health" ? "/health" : "/ready";
             bot.sendMessage(
