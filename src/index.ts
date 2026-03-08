@@ -27,7 +27,7 @@ import { SchedulerService } from "./services/scheduler";
 import { parseScheduleDate, formatScheduleTime } from "./utils/dateParser";
 import { MemoryStore } from "./ai/memoryStore";
 import { flushPersistence, getPersistenceBackend, initializePersistence } from "./storage/persistence";
-import { markBotReady, markPersistenceReady, markSchedulerReady } from "./appStatus";
+import { markBotReady, markPersistenceReady, markRpcReady, markRpcUnavailable, markSchedulerReady } from "./appStatus";
 import { UserPreferencesStore } from "./storage/userPreferences";
 import { formatUserDateTime } from "./utils/userDateTime";
 
@@ -90,6 +90,36 @@ export async function main() {
     const routerAddress = process.env.PAYABLES_ROUTER_ADDRESS || "0x0000000000000000000000000000000000000000";
 
     const provider = new ethers.JsonRpcProvider(providerUrl);
+    let rpcAvailable = false;
+    let rpcWarningLogged = false;
+
+    const withTimeout = async <T>(promise: Promise<T>, ms: number): Promise<T> => {
+        return await Promise.race([
+            promise,
+            new Promise<T>((_, reject) => setTimeout(() => reject(new Error(`Timed out after ${ms}ms`)), ms))
+        ]);
+    };
+
+    const probeRpc = async (): Promise<boolean> => {
+        try {
+            await withTimeout(provider.getBlockNumber(), 5000);
+            if (!rpcAvailable) {
+                console.log("[RPC] Connectivity restored.");
+            }
+            rpcAvailable = true;
+            rpcWarningLogged = false;
+            markRpcReady();
+            return true;
+        } catch (error: any) {
+            rpcAvailable = false;
+            markRpcUnavailable();
+            if (!rpcWarningLogged) {
+                console.error(`[RPC] Connectivity check failed: ${error.message}`);
+                rpcWarningLogged = true;
+            }
+            return false;
+        }
+    };
 
     const paymentHistorySource = (process.env.PAYMENT_HISTORY_SOURCE || "local").toLowerCase();
     const configuredChunkSize = Number.parseInt(process.env.PAYMENT_HISTORY_CHUNK || "", 10);
@@ -106,6 +136,7 @@ export async function main() {
     markPersistenceReady();
     registerShutdownHandlers();
     console.log(`[Persistence] Using ${getPersistenceBackend()} backend`);
+    await probeRpc();
 
     const formatRouterAddress = (address: string): string => {
         return `${address.slice(0, 6)}...${address.slice(-4)}`;
@@ -233,8 +264,9 @@ ${rows.join("\n")}`,
             return "🏦 **Account Summary**\n\nWallet: Not set up\nSaved vendors: **0**\nActive schedules: **0**\nRecorded payments: **0**\n\nNext: create your wallet with `create wallet`.";
         }
 
-        const rawUsdcBalance = await usdc.balanceOf(address).catch(() => 0n);
-        const balance = ethers.formatUnits(rawUsdcBalance, 6);
+        const balanceLine = rpcAvailable
+            ? `Available balance: **${ethers.formatUnits(await usdc.balanceOf(address).catch(() => 0n), 6)} USDC**`
+            : "Available balance: **Live RPC unavailable**";
         const lastPayment = recentPayments[recentPayments.length - 1];
         const lastPaymentLine = lastPayment
             ? `Last payment: **${lastPayment.amount} USDC** → ${lastPayment.vendor || `${lastPayment.address.slice(0, 8)}...`}`
@@ -247,7 +279,7 @@ ${rows.join("\n")}`,
             ? "Account state: **Ready to send and schedule payments**"
             : "Account state: **Wallet ready — add a vendor to speed up payments**";
 
-        return `🏦 **Account Summary**\n\nAddress: \`${address}\`\nAvailable balance: **${balance} USDC**\nSpent in the last 30 days: **${spent30d} USDC**\nRecorded payments: **${recordedPayments}**\nSaved vendors: **${vendorCount}**\nActive schedules: **${activeSchedules}**\n${readinessLine}\n${topVendorLine}\n${lastPaymentLine}\n\nTry \`wallet balance\`, \`payment history\`, or \`list schedules\`.`;
+        return `🏦 **Account Summary**\n\nAddress: \`${address}\`\n${balanceLine}\nSpent in the last 30 days: **${spent30d} USDC**\nRecorded payments: **${recordedPayments}**\nSaved vendors: **${vendorCount}**\nActive schedules: **${activeSchedules}**\n${readinessLine}\n${topVendorLine}\n${lastPaymentLine}\n\nTry \`wallet balance\`, \`payment history\`, or \`list schedules\`.`;
     };
 
     if (!token && !isTest) {
@@ -281,6 +313,11 @@ ${rows.join("\n")}`,
     const analyticsEngine = new AnalyticsEngine(bot, paymentLogStore);
     const scheduleStore = new ScheduleStore();
     const schedulerService = new SchedulerService(bot, scheduleStore, paymentEngine, userPreferencesStore);
+    if (shouldStartScheduler) {
+        setInterval(() => {
+            void probeRpc();
+        }, 30000);
+    }
 
     // ── Register tools ──
     const registry = new ToolRegistry();
@@ -462,11 +499,16 @@ ${rows.join("\n")}`,
             return;
         }
 
+        if (!rpcAvailable) {
+            bot.sendMessage(chatId, "⚠️ Live wallet data is temporarily unavailable because the Arc RPC endpoint is not responding. Try again in a moment.");
+            return;
+        }
+
         bot.sendMessage(chatId, "⏳ Fetching live wallet data from Circle...");
 
         try {
             // Fetch Native USDC Balance directly from Arc Contract
-            const rawUsdcBalance = await usdc.balanceOf(address).catch(() => 0n);
+            const rawUsdcBalance = await withTimeout(usdc.balanceOf(address), 7000).catch(() => 0n);
             const arcUsdcBalance = ethers.formatUnits(rawUsdcBalance, 6);
 
             // Fetch Transactions from ArcScan Explorer API
@@ -494,7 +536,9 @@ ${rows.join("\n")}`,
             bot.sendMessage(chatId, msg, { parse_mode: "Markdown" });
         } catch (error: any) {
             console.error("Wallet Intel error:", error);
-            bot.sendMessage(chatId, "❌ Failed to fetch wallet intelligence.");
+            rpcAvailable = false;
+            markRpcUnavailable();
+            bot.sendMessage(chatId, "⚠️ I couldn't fetch live wallet data right now because the Arc RPC endpoint is not responding. Try again in a moment.");
         }
     });
 
