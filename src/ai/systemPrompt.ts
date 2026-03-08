@@ -55,7 +55,7 @@ Action intents (for executing specific operations):
 - payment_history: {"action": "payment_history"} (Use this for general "recent payments" or "payment history" requests)
 - monthly_spending: {"action": "monthly_spending"}
 - status: {"action": "status"}
-- export_wallet: {"action": "export_wallet"}
+- export_wallet: {"action": "export_wallet"} (Use this for wallet recovery, custody, backup, private key, seed phrase, or export questions)
 - create_wallet: {"action": "create_wallet"}
 - show_wallet: {"action": "show_wallet"}
 - wallet_intelligence: {"action": "wallet_intelligence"}

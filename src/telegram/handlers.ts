@@ -32,7 +32,7 @@ export function setupHandlers(
 • \`wallet balance\` — Show live balance and recent chain activity
 • \`account summary\` — Show your account overview
 • \`status\` — Show account status
-• \`export wallet\` — Show wallet export details
+• \`wallet recovery\` — Show wallet custody and recovery details
 
 *Payments*
 • \`send 5 usdc to jack\` — Send to a saved vendor

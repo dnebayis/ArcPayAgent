@@ -711,7 +711,13 @@ export class IntentParser {
             return { action: "status" };
         }
 
-        // ── Export wallet ──
+        // ── Wallet recovery / custody details ──
+        if (this.matchesAny(lower, [
+            "wallet recovery", "recover wallet", "wallet security", "wallet custody", "wallet details"
+        ])) {
+            return { action: "export_wallet" };
+        }
+
         if (this.containsAny(lower, ["export", "backup"]) && this.containsAny(lower, [
             "wallet", "key", "keys", "private", "seed", "phrase",
         ])) {

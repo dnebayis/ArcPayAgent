@@ -507,13 +507,17 @@ ${rows.join("\n")}`,
         }
     });
 
-    registry.register("export_wallet", "Export wallet details", (chatId) => {
+    registry.register("export_wallet", "Show wallet recovery details", (chatId) => {
         const address = walletStore.getWalletAddress(chatId);
 
         if (address) {
-            bot.sendMessage(chatId, `ℹ️ **Circle Programmable Wallet**\n\nYour wallet is securely managed by Circle Developer-Controlled Wallets.\n\n**Wallet Address:**\n\`${address}\``, { parse_mode: "Markdown" });
+            bot.sendMessage(
+                chatId,
+                `ℹ️ **Wallet recovery details**\n\nYour wallet uses **Circle Developer-Controlled Wallets**.\n\nThis means ArcPay manages the wallet infrastructure for you. There is **no private key export** or seed phrase to download from the bot.\n\n**Wallet address:**\n\`${address}\`\n\n**How recovery works:**\n• If you still control this ArcPay account, you can access the same wallet again.\n• Recovery depends on ArcPay's secured wallet custody setup.\n• If you need a self-custody wallet, use a separate wallet app and send funds there.`,
+                { parse_mode: "Markdown" }
+            );
         } else {
-            bot.sendMessage(chatId, "No wallet to export yet. Try `create wallet` first.", { parse_mode: "Markdown" });
+            bot.sendMessage(chatId, "No wallet found yet. Try `create wallet` first, then ask for `wallet recovery` details.", { parse_mode: "Markdown" });
         }
     });
 
