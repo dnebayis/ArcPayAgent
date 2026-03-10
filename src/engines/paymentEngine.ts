@@ -193,7 +193,8 @@ export class PaymentEngine {
             this.sessionStore.setPendingPayment(chatId, vendorName || beneficiary, parseFloat(amountStr));
         }
 
-        const message = `Prepare payment\n\n${amountStr} USDC → \`${resolvedBeneficiary}\``;
+        const displayRecipient = vendorName || inputName;
+        const message = `Review payment\n\nAmount: **${amountStr} USDC**\nRecipient: **${displayRecipient}**\nDestination: \`${resolvedBeneficiary}\`${memo ? `\nMemo: ${memo}` : ""}\n\nWhat happens next:\n• I’ll check your balance\n• I’ll check whether approval is needed\n• I’ll submit the payment through Circle after you confirm`;
 
         const inlineKeyboard = [
             [
@@ -267,7 +268,8 @@ export class PaymentEngine {
             this.sessionStore.updatePendingPayment(chatId, { vendor: payment.vendorName || payment.beneficiary, amount: parseFloat(payment.amountStr) });
         }
 
-        const message = `Updated payment\n\n${payment.amountStr} USDC → \`${payment.vendorName ? payment.vendorName : payment.beneficiary}\`${updatedMemo ? `\nMemo: ${updatedMemo}` : ""}`;
+        const displayRecipient = payment.vendorName || payment.beneficiary;
+        const message = `Payment updated\n\nAmount: **${payment.amountStr} USDC**\nRecipient: **${displayRecipient}**\nDestination: \`${payment.beneficiary}\`${updatedMemo ? `\nMemo: ${updatedMemo}` : ""}\n\nWhat happens next:\n• I’ll check your balance\n• I’ll check whether approval is needed\n• I’ll submit the payment through Circle after you confirm`;
 
         const inlineKeyboard = [
             [
@@ -329,9 +331,10 @@ export class PaymentEngine {
             if (action === "confirm") {
                 const balance = await this.usdc.balanceOf(walletAddress);
                 if (balance < payment.amount) {
-                    this.bot.editMessageText(`❌ Insufficient USDC balance. Requires ${payment.amountStr} USDC.`, {
+                    this.bot.editMessageText(`❌ **Insufficient balance**\n\nRequired: ${payment.amountStr} USDC\nAvailable: ${ethers.formatUnits(balance, 6)} USDC\n\nTop up your wallet and try again.`, {
                         chat_id: query.message.chat.id,
-                        message_id: query.message.message_id
+                        message_id: query.message.message_id,
+                        parse_mode: "Markdown"
                     });
                     delete this.pendingPay[chatIdStr];
                     if (this.sessionStore) this.sessionStore.clearPendingState(chatId);
@@ -342,9 +345,10 @@ export class PaymentEngine {
                 const needsApproval = currentAllowance < payment.amount;
 
                 if (needsApproval) {
-                    this.bot.editMessageText("Approval required to spend USDC.", {
+                    this.bot.editMessageText(`Approval required before payment\n\nAmount: ${payment.amountStr} USDC\nDestination: \`${payment.beneficiary}\`\n\nThis one-time approval lets the Arc router move USDC from your wallet for this payment flow.`, {
                         chat_id: query.message.chat.id,
                         message_id: query.message.message_id,
+                        parse_mode: "Markdown",
                         reply_markup: {
                             inline_keyboard: [
                                 [
@@ -361,7 +365,7 @@ export class PaymentEngine {
             }
 
             if (action === "approve") {
-                this.bot.editMessageText("Approving router via Circle (this might take a few moments)...", {
+                this.bot.editMessageText("Submitting approval to Circle. This can take a few moments...", {
                     chat_id: query.message.chat.id,
                     message_id: query.message.message_id
                 });
