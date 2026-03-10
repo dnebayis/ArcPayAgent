@@ -286,7 +286,7 @@ Only the wallet owner can use payment, request, and schedule action buttons.`;
                 conversationMemory.addUserMessage(chatId, originalText);
             }
 
-            const intent = await intentParser.parse(chatId, text);
+            const intent = await intentParser.parse(chatId, originalText);
             await toolRouter.routeIntent(chatId, intent);
 
             // Track bot response in conversation memory
