@@ -72,6 +72,8 @@ export function setupHandlers(
 • \`spending by vendor\` — Show vendor breakdown
 • \`monthly spending\` — Show monthly totals
 
+Need help with something specific? Contact @siyabaldacc.
+
 _Tip: Natural language works too. Example: “send 10 usdc to jack”, “show recent payments”, “pay the invoice”._`;
 
     bot.setMyCommands([
