@@ -125,6 +125,12 @@ describe("IntentParser — Heuristic Layer", () => {
     it("should detect 'check balance'", async () => {
         expect((await parser.parse(1, "check balance")).action).toBe("wallet_intelligence");
     });
+
+    it("should preserve schedule id casing when cancelling", async () => {
+        const intent = await parser.parse(1, "cancel j7lFzHu4");
+        expect(intent.action).toBe("cancel_schedule");
+        expect(intent.name).toBe("j7lFzHu4");
+    });
 });
 
 describe("IntentParser — Smart Fallback", () => {

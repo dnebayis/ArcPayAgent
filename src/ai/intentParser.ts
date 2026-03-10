@@ -58,6 +58,7 @@ export class IntentParser {
 
     async parse(chatId: number, input: string): Promise<ParsedIntent> {
         const rawText = input.trim();
+        const cancelScheduleMatch = rawText.match(/^cancel(?:\s+schedule)?\s+([A-Za-z0-9_-]+)$/i);
         const decision = buildDecision(rawText);
         const text = decision.normalizedText;
         const logIntent = (intent: ParsedIntent) => {
@@ -85,6 +86,15 @@ export class IntentParser {
                 message: validation.message || resolvedIntent.message
             };
         };
+
+        if (cancelScheduleMatch) {
+            const intent = finalizeIntent({
+                action: "cancel_schedule",
+                name: cancelScheduleMatch[1]
+            }, 0.95);
+            logIntent(intent);
+            return intent;
+        }
 
         // ── Layer 1: Deterministic decision engine ──
         if (decision.detectedIntent) {
