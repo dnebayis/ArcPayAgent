@@ -59,7 +59,7 @@ Action intents (for executing specific operations):
 - create_wallet: {"action": "create_wallet"}
 - show_wallet: {"action": "show_wallet"}
 - wallet_intelligence: {"action": "wallet_intelligence"}
-- schedule_payment: {"action": "schedule_payment", "amount": <number>, "beneficiary": "<vendor>", "frequency": "once|weekly|monthly", "schedule_time": "<time expression>"}
+- schedule_payment: {"action": "schedule_payment", "amount": <number>, "beneficiary": "<vendor_or_address>", "frequency": "once|weekly|monthly", "schedule_time": "<time expression>"}
 - list_schedules: {"action": "list_schedules"}
 - cancel_schedule: {"action": "cancel_schedule", "name": "<schedule_id>"}
 

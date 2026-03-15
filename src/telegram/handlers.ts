@@ -61,7 +61,8 @@ export function setupHandlers(
 • \`/llmkey remove\` — Remove your saved API key
 
 *Schedules*
-• \`schedule payment 10 usdc to aws tomorrow\` — Create a schedule
+• \`schedule payment 10 usdc to aws tomorrow\` — Create a schedule for a saved vendor
+• \`schedule payment 10 usdc to 0x...\` — Create a schedule for a wallet address
 • \`list schedules\` — List active schedules
 • \`cancel schedule <id>\` — Cancel a schedule
 
@@ -187,6 +188,7 @@ ArcPay helps you manage wallets, vendors, payments, invoices, and schedules on A
 • Send a PDF or photo invoice
 • \`request 20 usdc\`
 • \`schedule payment 10 usdc to aws tomorrow\`
+• \`schedule payment 10 usdc to 0x...\`
 • \`/llmkey set openai sk-...\`
 
 Type \`help\` or \`/help\` to see the full command list.
@@ -493,13 +495,21 @@ Only the wallet owner can use payment, request, and schedule action buttons.`;
                 return;
             }
 
-            bot.editMessageText("Preparing payment from request...", {
-                chat_id: chatId,
-                message_id: query.message.message_id
-            });
-
-            paymentRequestEngine.markPaid(requestId);
-            paymentEngine.preparePayment(ownerChatId, request.recipient, request.amount.toString(), `PayReq ${requestId}`);
+            bot.answerCallbackQuery(query.id, { text: "Opening payment confirmation..." });
+            paymentEngine.preparePayment(
+                ownerChatId,
+                request.recipient,
+                request.amount.toString(),
+                `PayReq ${requestId}`,
+                {
+                    source: {
+                        type: "request",
+                        requestId,
+                        originChatId: chatId,
+                        originMessageId: query.message.message_id
+                    }
+                }
+            );
             return;
         }
 
@@ -528,12 +538,21 @@ Only the wallet owner can use payment, request, and schedule action buttons.`;
             }
             const schedule = scheduleStore.getScheduleById(ownerChatId, scheduleId);
             if (schedule) {
-                bot.editMessageText(`Preparing scheduled payment: ${schedule.amount} USDC → ${schedule.vendor}...`, {
-                    chat_id: chatId,
-                    message_id: query.message.message_id
-                });
-                scheduleStore.markExecuted(ownerChatId, scheduleId);
-            paymentEngine.preparePayment(ownerChatId, schedule.vendor, schedule.amount.toString(), "Scheduled");
+                bot.answerCallbackQuery(query.id, { text: "Opening scheduled payment confirmation..." });
+                paymentEngine.preparePayment(
+                    ownerChatId,
+                    schedule.vendor,
+                    schedule.amount.toString(),
+                    "Scheduled",
+                    {
+                        source: {
+                            type: "schedule",
+                            scheduleId,
+                            originChatId: chatId,
+                            originMessageId: query.message.message_id
+                        }
+                    }
+                );
             } else {
                 bot.answerCallbackQuery(query.id, { text: "Schedule not found." });
             }

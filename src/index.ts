@@ -23,6 +23,9 @@ import { PaymentLogStore } from "./storage/paymentLogs";
 import { AnalyticsEngine } from "./engines/analyticsEngine";
 import { CircleClient } from "./blockchain/circleClient";
 import { ScheduleStore } from "./storage/schedules";
+import { PendingPaymentStore } from "./storage/pendingPayments";
+import { SubmittedTransactionStore } from "./storage/submittedTransactions";
+import { ARC_TESTNET_RPC_URL, getExpectedArcChainId } from "./blockchain/arcConfig";
 import { SchedulerService } from "./services/scheduler";
 import { parseScheduleDate, formatScheduleTime } from "./utils/dateParser";
 import { MemoryStore } from "./ai/memoryStore";
@@ -30,6 +33,7 @@ import { flushPersistence, getPersistenceBackend, initializePersistence } from "
 import { markBotReady, markPersistenceReady, markRpcReady, markRpcUnavailable, markSchedulerReady } from "./appStatus";
 import { UserPreferencesStore } from "./storage/userPreferences";
 import { formatUserDateTime } from "./utils/userDateTime";
+import { loadRuntimeConfig } from "./config";
 
 dotenv.config();
 process.env.NTBA_FIX_350 = process.env.NTBA_FIX_350 || "1";
@@ -66,28 +70,25 @@ function registerShutdownHandlers(): void {
 export async function main() {
     console.log("Starting ArcPay Agent...");
     const isTest = process.env.NODE_ENV === "test";
+    const config = loadRuntimeConfig(process.env, { isTest });
     const shouldStartPolling = !isTest;
     const shouldStartScheduler = !isTest;
     const shouldStartHttp = !isTest;
     const port = Number.parseInt(process.env.PORT || "3000", 10) || 3000;
 
-    const token = process.env.TELEGRAM_TOKEN;
-    const botUsername = process.env.BOT_USERNAME || "ArcPayAgentBot";
+    const token = config.TELEGRAM_TOKEN;
+    const botUsername = config.BOT_USERNAME;
 
-    const circleApiKey = process.env.CIRCLE_API_KEY || "";
-    const circleEntitySecret = process.env.CIRCLE_ENTITY_SECRET || "";
-    const circleWalletSetId = process.env.CIRCLE_WALLET_SET_ID || "";
-    const circleApiUrl = process.env.CIRCLE_API_URL || "https://api.circle.com/v1/w3s";
+    const circleApiKey = config.CIRCLE_API_KEY;
+    const circleEntitySecret = config.CIRCLE_ENTITY_SECRET;
+    const circleWalletSetId = config.CIRCLE_WALLET_SET_ID;
+    const circleApiUrl = config.CIRCLE_API_URL;
 
-    const llmSecret = process.env.LLM_KEY_SECRET || "";
+    const llmSecret = config.LLM_KEY_SECRET;
 
-    if (!isTest && !llmSecret) {
-        throw new Error("Missing LLM_KEY_SECRET. Refusing to start with an unsafe fallback secret.");
-    }
-
-    const providerUrl = process.env.ARC_RPC_URL || "https://testnet.arcscan.app/rpc";
-    const usdcAddress = process.env.USDC_ADDRESS || "0x0000000000000000000000000000000000000000";
-    const routerAddress = process.env.PAYABLES_ROUTER_ADDRESS || "0x0000000000000000000000000000000000000000";
+    const providerUrl = config.ARC_RPC_URL;
+    const usdcAddress = config.USDC_ADDRESS;
+    const routerAddress = config.PAYABLES_ROUTER_ADDRESS;
 
     const provider = new ethers.JsonRpcProvider(providerUrl);
     let rpcAvailable = false;
@@ -102,7 +103,14 @@ export async function main() {
 
     const probeRpc = async (): Promise<boolean> => {
         try {
-            await withTimeout(provider.getBlockNumber(), 5000);
+            const [_, network] = await withTimeout(Promise.all([
+                provider.getBlockNumber(),
+                provider.getNetwork()
+            ]), 5000);
+            const expectedChainId = getExpectedArcChainId();
+            if (network.chainId !== expectedChainId) {
+                throw new Error(`RPC is connected to chain ${network.chainId.toString()} but expected Arc Testnet ${expectedChainId.toString()}`);
+            }
             if (!rpcAvailable) {
                 console.log("[RPC] Connectivity restored.");
             }
@@ -297,6 +305,8 @@ ${rows.join("\n")}`,
     const paymentRequestStore = new PaymentRequestStore();
     const paymentLogStore = new PaymentLogStore();
     const userPreferencesStore = new UserPreferencesStore();
+    const pendingPaymentStore = new PendingPaymentStore();
+    const submittedTransactionStore = new SubmittedTransactionStore();
 
     const usdc = new USDC(provider, usdcAddress);
     const router = new ArcRouter(provider, routerAddress);
@@ -306,7 +316,50 @@ ${rows.join("\n")}`,
     const sessionStore = new SessionStore();
     const memoryStore = new MemoryStore();
 
-    const paymentEngine = new PaymentEngine(bot, usdc, router, routerAddress, walletStore, vendorStore, provider, paymentLogStore, circleClient, sessionStore, memoryStore);
+    const paymentEngine = new PaymentEngine(
+        bot,
+        usdc,
+        router,
+        routerAddress,
+        walletStore,
+        vendorStore,
+        provider,
+        paymentLogStore,
+        circleClient,
+        sessionStore,
+        memoryStore,
+        pendingPaymentStore,
+        submittedTransactionStore,
+        (chatId, payment) => {
+            const source = payment.source;
+            if (!source) return;
+
+            if (source.type === "request" && source.requestId) {
+                paymentRequestEngine.markPaid(source.requestId);
+                if (source.originChatId && source.originMessageId) {
+                    bot.editMessageText("✅ Payment request completed.", {
+                        chat_id: source.originChatId,
+                        message_id: source.originMessageId
+                    }).catch((error) => {
+                        console.warn("[Request] Failed to update original request message:", error);
+                    });
+                }
+                return;
+            }
+
+            if (source.type === "schedule" && source.scheduleId) {
+                scheduleStore.markExecuted(chatId, source.scheduleId);
+                if (source.originChatId && source.originMessageId) {
+                    bot.editMessageText(`✅ Scheduled payment completed: ${payment.amountStr} USDC → ${payment.vendorName || payment.beneficiary}`, {
+                        chat_id: source.originChatId,
+                        message_id: source.originMessageId
+                    }).catch((error) => {
+                        console.warn("[Schedule] Failed to update original schedule message:", error);
+                    });
+                }
+            }
+        }
+    );
     const intentParser = new IntentParser(llmKeyStore, conversationMemory, sessionStore, memoryStore);
     const invoiceEngine = new InvoiceEngine(bot, invoiceStore, vendorStore, memoryStore);
     const paymentRequestEngine = new PaymentRequestEngine(bot, paymentRequestStore, walletStore, botUsername);
@@ -317,6 +370,9 @@ ${rows.join("\n")}`,
         setInterval(() => {
             void probeRpc();
         }, 30000);
+        setInterval(() => {
+            void paymentEngine.reconcileSubmittedTransactions();
+        }, 5000);
     }
 
     // ── Register tools ──
@@ -603,7 +659,7 @@ ${rows.join("\n")}`,
 
     registry.register("schedule_payment", "Schedule a future payment", (chatId, intent) => {
         if (!intent.amount || !intent.beneficiary) {
-            bot.sendMessage(chatId, "Please specify the amount, recipient, and time.\nExample: `schedule payment 10 usdc to aws tomorrow`", { parse_mode: "Markdown" });
+            bot.sendMessage(chatId, "Please specify the amount, recipient, and time.\nExamples: `schedule payment 10 usdc to aws tomorrow` or `schedule payment 10 usdc to 0x... in 1 minute`", { parse_mode: "Markdown" });
             return;
         }
 
@@ -678,7 +734,7 @@ ${rows.join("\n")}`,
     registry.register("list_schedules", "List scheduled payments", (chatId) => {
         const schedules = scheduleStore.getSchedules(chatId);
         if (schedules.length === 0) {
-            bot.sendMessage(chatId, "📅 No scheduled payments yet. Try `schedule payment 10 usdc to aws tomorrow`.", { parse_mode: "Markdown" });
+            bot.sendMessage(chatId, "📅 No scheduled payments yet. Try `schedule payment 10 usdc to aws tomorrow` or `schedule payment 10 usdc to 0x... in 1 minute`.", { parse_mode: "Markdown" });
             return;
         }
 

@@ -61,6 +61,14 @@ describe("IntentParser — Regex Layer", () => {
         expect(intent.action).toBe("create_payment_request");
         expect(intent.amount).toBe(5);
     });
+
+    it("should parse scheduled payments to a wallet address", async () => {
+        const intent = await parser.parse(1, "schedule payment 5 usdc to 0x00000000000000000000000000000000000000ab in 1 minute");
+        expect(intent.action).toBe("schedule_payment");
+        expect(intent.amount).toBe(5);
+        expect(intent.beneficiary).toBe("0x00000000000000000000000000000000000000ab");
+        expect(intent.schedule_time).toBe("in 1 minute");
+    });
 });
 
 describe("IntentParser — Heuristic Layer", () => {

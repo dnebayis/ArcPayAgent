@@ -76,7 +76,7 @@ export class ToolRouter {
             if (!intent.amount && intent.beneficiary) {
                 return `How much USDC should I schedule for ${intent.beneficiary}?`;
             }
-            return "Tell me the amount, recipient, and time. Example: `schedule payment 10 usdc to aws tomorrow`";
+            return "Tell me the amount, recipient, and time. Example: `schedule payment 10 usdc to aws tomorrow` or `schedule payment 10 usdc to 0x... in 1 minute`";
         }
 
         return "Please clarify what you want me to do.";

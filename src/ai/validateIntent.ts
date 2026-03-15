@@ -53,7 +53,7 @@ export function validateIntent(intent: IntentToValidate): ValidationResult {
             return {
                 safeToExecute: false,
                 needsClarification: true,
-                message: "Who should I schedule this payment for?"
+                message: "Who should I schedule this payment for? Use a saved vendor or a full 0x address."
             };
         }
 

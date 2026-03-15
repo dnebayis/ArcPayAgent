@@ -1,4 +1,5 @@
 import { ethers } from "ethers";
+import { randomUUID } from "crypto";
 import TelegramBot from "node-telegram-bot-api";
 import { USDC } from "../blockchain/usdc";
 import { ArcRouter } from "../blockchain/arcRouter";
@@ -8,6 +9,9 @@ import { PaymentLogStore } from "../storage/paymentLogs";
 import { CircleClient, CircleTransactionStatus } from "../blockchain/circleClient";
 import { SessionStore } from "../agent/sessionStore";
 import { MemoryStore } from "../ai/memoryStore";
+import { PendingPaymentSource, PendingPaymentStore } from "../storage/pendingPayments";
+import { SubmittedTransactionContext, SubmittedTransactionRecord, SubmittedTransactionStatus, SubmittedTransactionStore } from "../storage/submittedTransactions";
+import { getArcGasReserveUsdc, getExpectedArcChainId } from "../blockchain/arcConfig";
 
 export interface PendingPayment {
     beneficiary: string;
@@ -15,12 +19,15 @@ export interface PendingPayment {
     amountStr: string;
     amount: bigint;
     memo: string | null;
+    onConfirmed?: () => void;
+    source?: PendingPaymentSource;
 }
 
 type ExecutionState = "prepared" | "submitted" | "confirmed" | "failed";
 
 export class PaymentEngine {
     private pendingPay: Record<string, PendingPayment> = {};
+    private processingChats: Set<string> = new Set();
 
     constructor(
         private bot: TelegramBot,
@@ -33,8 +40,150 @@ export class PaymentEngine {
         private paymentLogs: PaymentLogStore,
         private circleClient: CircleClient,
         private sessionStore?: SessionStore,
-        private memoryStore?: MemoryStore
+        private memoryStore?: MemoryStore,
+        private pendingPaymentStore?: PendingPaymentStore,
+        private submittedTransactionStore?: SubmittedTransactionStore,
+        private postConfirmHandler?: (chatId: number, payment: PendingPayment) => void
     ) { }
+
+    private persistPendingPayment(chatId: number, payment: PendingPayment): void {
+        this.pendingPaymentStore?.setPendingPayment(chatId, {
+            beneficiary: payment.beneficiary,
+            vendorName: payment.vendorName,
+            amountStr: payment.amountStr,
+            amount: payment.amount.toString(),
+            memo: payment.memo,
+            source: payment.source
+        });
+    }
+
+    private hydratePendingPayment(chatId: number): PendingPayment | null {
+        const restored = this.pendingPaymentStore?.getPendingPayment(chatId);
+        if (!restored) {
+            return null;
+        }
+
+        const payment: PendingPayment = {
+            beneficiary: restored.beneficiary,
+            vendorName: restored.vendorName,
+            amountStr: restored.amountStr,
+            amount: BigInt(restored.amount),
+            memo: restored.memo,
+            source: restored.source
+        };
+
+        this.pendingPay[chatId.toString()] = payment;
+        return payment;
+    }
+
+    private createSubmittedRecord(
+        chatId: number,
+        walletId: string,
+        payment: PendingPayment,
+        context: SubmittedTransactionContext,
+        options?: { txId?: string | null; idempotencyKey?: string; status?: SubmittedTransactionStatus }
+    ): SubmittedTransactionRecord {
+        return {
+            chatId,
+            txId: options?.txId ?? null,
+            idempotencyKey: options?.idempotencyKey ?? randomUUID(),
+            status: options?.status ?? "creating",
+            context,
+            walletId,
+            beneficiary: payment.beneficiary,
+            vendorName: payment.vendorName,
+            amountStr: payment.amountStr,
+            amount: payment.amount.toString(),
+            memo: payment.memo,
+            source: payment.source,
+            submittedAt: Date.now()
+        };
+    }
+
+    private createSubmissionAttempt(chatId: number, walletId: string, payment: PendingPayment, context: SubmittedTransactionContext): SubmittedTransactionRecord {
+        const record = this.createSubmittedRecord(chatId, walletId, payment, context);
+        this.submittedTransactionStore?.set(record);
+        return record;
+    }
+
+    private markSubmittedTransaction(record: SubmittedTransactionRecord, txId: string): SubmittedTransactionRecord {
+        const updatedRecord: SubmittedTransactionRecord = {
+            ...record,
+            txId,
+            status: "submitted"
+        };
+        this.submittedTransactionStore?.set(updatedRecord);
+        return updatedRecord;
+    }
+
+    private clearSubmittedTransaction(chatId: number): void {
+        this.submittedTransactionStore?.clear(chatId);
+    }
+
+    private getSubmittedTransaction(chatId: number): SubmittedTransactionRecord | null {
+        return this.submittedTransactionStore?.get(chatId) || null;
+    }
+
+    private rehydrateSubmittedPayment(record: SubmittedTransactionRecord): PendingPayment {
+        return {
+            beneficiary: record.beneficiary,
+            vendorName: record.vendorName,
+            amountStr: record.amountStr,
+            amount: BigInt(record.amount),
+            memo: record.memo,
+            source: record.source
+        };
+    }
+
+    private getTransactionPayload(record: SubmittedTransactionRecord): { contractAddress: string; encodedData: string } {
+        const payment = this.rehydrateSubmittedPayment(record);
+
+        if (record.context === "approval") {
+            return {
+                contractAddress: this.usdc.getAddress(),
+                encodedData: this.usdc.encodeApprove(this.routerAddress, payment.amount)
+            };
+        }
+
+        return {
+            contractAddress: this.routerAddress,
+            encodedData: this.router.encodePay(payment.beneficiary, payment.amount, payment.memo || "")
+        };
+    }
+
+    private async ensureSubmittedRecord(record: SubmittedTransactionRecord): Promise<SubmittedTransactionRecord> {
+        if (record.txId && record.status === "submitted") {
+            return record;
+        }
+
+        const payload = this.getTransactionPayload(record);
+        const txId = await this.circleClient.createTransaction(
+            record.walletId,
+            payload.contractAddress,
+            payload.encodedData,
+            record.idempotencyKey
+        );
+
+        return this.markSubmittedTransaction(record, txId);
+    }
+
+    private getProcessingKey(chatId: number): string {
+        return chatId.toString();
+    }
+
+    private beginProcessing(chatId: number): boolean {
+        const key = this.getProcessingKey(chatId);
+        if (this.processingChats.has(key)) {
+            return false;
+        }
+
+        this.processingChats.add(key);
+        return true;
+    }
+
+    private endProcessing(chatId: number): void {
+        this.processingChats.delete(this.getProcessingKey(chatId));
+    }
 
     private getPollingConfig(): { attempts: number; intervalMs: number } {
         const attempts = Number.parseInt(process.env.CIRCLE_TX_POLL_ATTEMPTS || "", 10);
@@ -50,6 +199,22 @@ export class PaymentEngine {
         const reason = status.errorReason || status.state;
         const details = status.errorDetails ? ` (${status.errorDetails})` : "";
         return `${reason}${details}`;
+    }
+
+    private async validateArcNetwork(): Promise<string | null> {
+        try {
+            const network = await this.provider.getNetwork();
+            const expectedChainId = getExpectedArcChainId();
+
+            if (network.chainId !== expectedChainId) {
+                return `⚠️ **Arc network mismatch**\n\nExpected chain ID: \`${expectedChainId.toString()}\`\nConnected chain ID: \`${network.chainId.toString()}\`\n\nPayments are blocked until the Arc RPC configuration is fixed.`;
+            }
+
+            return null;
+        } catch (error) {
+            console.error("[Payment] Failed to verify Arc network:", error);
+            return "⚠️ I couldn't verify the Arc network right now. Please try again in a moment.";
+        }
     }
 
     private async waitForFinalCircleState(txId: string): Promise<CircleTransactionStatus | null> {
@@ -85,6 +250,7 @@ export class PaymentEngine {
 
     private clearPendingPayment(chatId: number): void {
         delete this.pendingPay[chatId.toString()];
+        this.pendingPaymentStore?.clearPendingPayment(chatId);
         if (this.sessionStore) this.sessionStore.clearPendingState(chatId);
     }
 
@@ -100,7 +266,7 @@ export class PaymentEngine {
             if (context === "approval") {
                 this.bot.sendMessage(
                     chatId,
-                    `⏳ Approval submitted to Circle.\n\nCircle TxID: \`${txId}\`\nStatus: waiting for final confirmation.\nPlease tap Confirm again in a few seconds.`,
+                    `⏳ Approval submitted to Circle.\n\nCircle TxID: \`${txId}\`\nStatus: waiting for final confirmation.\nI’ll continue automatically when Circle reaches a final state.`,
                     { parse_mode: "Markdown" }
                 );
                 return "submitted";
@@ -116,6 +282,7 @@ export class PaymentEngine {
         }
 
         if (this.circleClient.isSuccessfulTerminalState(finalStatus.state)) {
+            this.clearSubmittedTransaction(chatId);
             if (context === "approval") {
                 return "confirmed";
             }
@@ -126,11 +293,14 @@ export class PaymentEngine {
                 { parse_mode: "Markdown" }
             );
             this.finalizePayment(chatId, payment, txId);
+            payment.onConfirmed?.();
+            this.postConfirmHandler?.(chatId, payment);
             this.clearPendingPayment(chatId);
             return "confirmed";
         }
 
         if (context === "approval") {
+            this.clearSubmittedTransaction(chatId);
             this.bot.sendMessage(
                 chatId,
                 `❌ Approval failed on Circle.\n\nCircle TxID: \`${txId}\`\nReason: ${this.describeFailure(finalStatus)}`,
@@ -139,6 +309,7 @@ export class PaymentEngine {
             return "failed";
         }
 
+        this.clearSubmittedTransaction(chatId);
         this.bot.sendMessage(
             chatId,
             `❌ **Payment failed**\n\nAmount: ${payment.amountStr} USDC\nRecipient: \`${payment.beneficiary}\`\nCircle TxID: \`${txId}\`\nReason: ${this.describeFailure(finalStatus)}`,
@@ -148,7 +319,74 @@ export class PaymentEngine {
         return "failed";
     }
 
-    async preparePayment(chatId: number, beneficiary: string, amountStr: string, memo: string | null = "ArcPay") {
+    private async reconcileRecord(record: SubmittedTransactionRecord): Promise<void> {
+        const ensuredRecord = await this.ensureSubmittedRecord(record);
+        const tx = await this.circleClient.getTransaction(ensuredRecord.txId!);
+        if (!this.circleClient.isSuccessfulTerminalState(tx.state) && !this.circleClient.isFailedTerminalState(tx.state)) {
+            return;
+        }
+
+        const payment = this.rehydrateSubmittedPayment(ensuredRecord);
+        this.clearSubmittedTransaction(ensuredRecord.chatId);
+
+        if (ensuredRecord.context === "approval") {
+            if (this.circleClient.isSuccessfulTerminalState(tx.state)) {
+                await this.executeRouterPayment(ensuredRecord.chatId, ensuredRecord.walletId, payment);
+                return;
+            }
+
+            this.bot.sendMessage(
+                ensuredRecord.chatId,
+                `❌ Approval failed on Circle.\n\nCircle TxID: \`${ensuredRecord.txId}\`\nReason: ${this.describeFailure(tx)}`,
+                { parse_mode: "Markdown" }
+            );
+            return;
+        }
+
+        if (this.circleClient.isSuccessfulTerminalState(tx.state)) {
+            this.bot.sendMessage(
+                ensuredRecord.chatId,
+                `✅ **Payment confirmed**\n\nAmount: ${payment.amountStr} USDC\nRecipient: \`${payment.beneficiary}\`\nCircle TxID: \`${ensuredRecord.txId}\``,
+                { parse_mode: "Markdown" }
+            );
+            this.finalizePayment(ensuredRecord.chatId, payment, ensuredRecord.txId!);
+            payment.onConfirmed?.();
+            this.postConfirmHandler?.(ensuredRecord.chatId, payment);
+            return;
+        }
+
+        this.bot.sendMessage(
+            ensuredRecord.chatId,
+            `❌ **Payment failed**\n\nAmount: ${payment.amountStr} USDC\nRecipient: \`${payment.beneficiary}\`\nCircle TxID: \`${ensuredRecord.txId}\`\nReason: ${this.describeFailure(tx)}`,
+            { parse_mode: "Markdown" }
+        );
+    }
+
+    async reconcileSubmittedTransactions(): Promise<void> {
+        const records = this.submittedTransactionStore?.list() || [];
+
+        for (const record of records) {
+            if (!this.beginProcessing(record.chatId)) {
+                continue;
+            }
+
+            try {
+                await this.reconcileRecord(record);
+            } catch (error) {
+                console.error(`[Payment] Failed to reconcile submitted transaction ${record.txId}:`, error);
+            } finally {
+                this.endProcessing(record.chatId);
+            }
+        }
+    }
+
+    async preparePayment(
+        chatId: number,
+        beneficiary: string,
+        amountStr: string,
+        memo: string | null = "ArcPay",
+        options?: { onConfirmed?: () => void; source?: PendingPaymentSource }
+    ) {
         if (!amountStr || isNaN(parseFloat(amountStr)) || parseFloat(amountStr) <= 0) {
             this.bot.sendMessage(chatId, "Please enter a valid amount. Example: `send 5 usdc to jack`", { parse_mode: "Markdown" });
             return;
@@ -187,7 +425,16 @@ export class PaymentEngine {
 
         const amount = ethers.parseUnits(amountStr, 6);
 
-        this.pendingPay[chatId.toString()] = { beneficiary: resolvedBeneficiary, vendorName, amountStr, amount, memo };
+        this.pendingPay[chatId.toString()] = {
+            beneficiary: resolvedBeneficiary,
+            vendorName,
+            amountStr,
+            amount,
+            memo,
+            onConfirmed: options?.onConfirmed,
+            source: options?.source
+        };
+        this.persistPendingPayment(chatId, this.pendingPay[chatId.toString()]);
 
         if (this.sessionStore) {
             this.sessionStore.setPendingPayment(chatId, vendorName || beneficiary, parseFloat(amountStr));
@@ -213,9 +460,8 @@ export class PaymentEngine {
 
     cancelPendingPayment(chatId: number) {
         const chatIdStr = chatId.toString();
-        if (this.pendingPay[chatIdStr]) {
-            delete this.pendingPay[chatIdStr];
-            if (this.sessionStore) this.sessionStore.clearPendingState(chatId);
+        if (this.pendingPay[chatIdStr] || this.hydratePendingPayment(chatId)) {
+            this.clearPendingPayment(chatId);
             this.bot.sendMessage(chatId, "✅ Payment cancelled.");
         } else {
             this.bot.sendMessage(chatId, "❌ No pending payment to cancel.");
@@ -224,7 +470,7 @@ export class PaymentEngine {
 
     updatePendingPayment(chatId: number, updates: { amount?: number, vendor?: string, memo?: string }) {
         const chatIdStr = chatId.toString();
-        const payment = this.pendingPay[chatIdStr];
+        const payment = this.pendingPay[chatIdStr] || this.hydratePendingPayment(chatId);
 
         if (!payment) {
             this.bot.sendMessage(chatId, "❌ No pending payment found to update.");
@@ -267,6 +513,7 @@ export class PaymentEngine {
         if (this.sessionStore) {
             this.sessionStore.updatePendingPayment(chatId, { vendor: payment.vendorName || payment.beneficiary, amount: parseFloat(payment.amountStr) });
         }
+        this.persistPendingPayment(chatId, payment);
 
         const displayRecipient = payment.vendorName || payment.beneficiary;
         const message = `Payment updated\n\nAmount: **${payment.amountStr} USDC**\nRecipient: **${displayRecipient}**\nDestination: \`${payment.beneficiary}\`${updatedMemo ? `\nMemo: ${updatedMemo}` : ""}\n\nWhat happens next:\n• I’ll check your balance\n• I’ll check whether approval is needed\n• I’ll submit the payment through Circle after you confirm`;
@@ -308,8 +555,7 @@ export class PaymentEngine {
         const chatIdStr = chatId.toString();
 
         if (action === "cancel") {
-            delete this.pendingPay[chatIdStr];
-            if (this.sessionStore) this.sessionStore.clearPendingState(chatId);
+            this.clearPendingPayment(chatId);
             this.bot.editMessageText("Payment cancelled.", {
                 chat_id: query.message.chat.id,
                 message_id: query.message.message_id
@@ -317,27 +563,54 @@ export class PaymentEngine {
             return;
         }
 
-        const payment = this.pendingPay[chatIdStr];
-        if (!payment) {
-            this.bot.answerCallbackQuery(query.id, { text: "Payment session expired or not found." });
+        if (!this.beginProcessing(chatId)) {
+            this.bot.answerCallbackQuery(query.id, { text: "This payment is already processing." });
             return;
         }
 
-        const walletId = this.walletStore.getWalletId(chatId);
-        const walletAddress = this.walletStore.getWalletAddress(chatId);
-        if (!walletId || !walletAddress) return;
-
         try {
+            const submitted = this.getSubmittedTransaction(chatId);
+            if (submitted) {
+                this.bot.answerCallbackQuery(query.id, {
+                    text: submitted.context === "approval"
+                        ? "Approval is already processing on Circle."
+                        : "Payment is already processing on Circle."
+                });
+                return;
+            }
+
+            const payment = this.pendingPay[chatIdStr] || this.hydratePendingPayment(chatId);
+            if (!payment) {
+                this.bot.answerCallbackQuery(query.id, { text: "Payment session expired or not found." });
+                return;
+            }
+
+            const walletId = this.walletStore.getWalletId(chatId);
+            const walletAddress = this.walletStore.getWalletAddress(chatId);
+            if (!walletId || !walletAddress) return;
+
             if (action === "confirm") {
-                const balance = await this.usdc.balanceOf(walletAddress);
-                if (balance < payment.amount) {
-                    this.bot.editMessageText(`❌ **Insufficient balance**\n\nRequired: ${payment.amountStr} USDC\nAvailable: ${ethers.formatUnits(balance, 6)} USDC\n\nTop up your wallet and try again.`, {
+                const networkError = await this.validateArcNetwork();
+                if (networkError) {
+                    this.bot.editMessageText(networkError, {
                         chat_id: query.message.chat.id,
                         message_id: query.message.message_id,
                         parse_mode: "Markdown"
                     });
-                    delete this.pendingPay[chatIdStr];
-                    if (this.sessionStore) this.sessionStore.clearPendingState(chatId);
+                    return;
+                }
+
+                const balance = await this.usdc.balanceOf(walletAddress);
+                const gasReserve = getArcGasReserveUsdc();
+                const totalRequired = payment.amount + gasReserve;
+
+                if (balance < totalRequired) {
+                    this.bot.editMessageText(`❌ **Insufficient balance**\n\nPayment: ${payment.amountStr} USDC\nArc gas reserve: ${ethers.formatUnits(gasReserve, 6)} USDC\nTotal required: ${ethers.formatUnits(totalRequired, 6)} USDC\nAvailable: ${ethers.formatUnits(balance, 6)} USDC\n\nArc uses USDC for gas, so keep a small extra balance before confirming.`, {
+                        chat_id: query.message.chat.id,
+                        message_id: query.message.message_id,
+                        parse_mode: "Markdown"
+                    });
+                    this.clearPendingPayment(chatId);
                     return;
                 }
 
@@ -371,16 +644,15 @@ export class PaymentEngine {
                 });
 
                 const encodedApprove = this.usdc.encodeApprove(this.routerAddress, payment.amount);
-                const txId = await this.circleClient.createTransaction(walletId, this.usdc.getAddress(), encodedApprove);
+                const record = this.createSubmissionAttempt(chatId, walletId, payment, "approval");
+                const txId = await this.circleClient.createTransaction(walletId, this.usdc.getAddress(), encodedApprove, record.idempotencyKey);
+                this.markSubmittedTransaction(record, txId);
+                this.clearPendingPayment(chatId);
                 const approvalState = await this.resolveSubmittedTransaction(chatId, payment, txId, "approval");
 
                 if (approvalState === "confirmed") {
                     await this.executeRouterPayment(chatId, walletId, payment, query.message.message_id);
                     return;
-                }
-
-                if (approvalState === "failed") {
-                    this.clearPendingPayment(chatId);
                 }
             }
         } catch (error: any) {
@@ -395,6 +667,8 @@ export class PaymentEngine {
 
             this.bot.sendMessage(chatId, userMsg);
             this.clearPendingPayment(chatId);
+        } finally {
+            this.endProcessing(chatId);
         }
     }
 
@@ -407,7 +681,10 @@ export class PaymentEngine {
         }
 
         const encodedPay = this.router.encodePay(payment.beneficiary, payment.amount, payment.memo || "");
-        const txId = await this.circleClient.createTransaction(walletId, this.routerAddress, encodedPay);
+        const record = this.createSubmissionAttempt(chatId, walletId, payment, "payment");
+        const txId = await this.circleClient.createTransaction(walletId, this.routerAddress, encodedPay, record.idempotencyKey);
+        this.markSubmittedTransaction(record, txId);
+        this.clearPendingPayment(chatId);
         this.bot.sendMessage(chatId, `⏳ **Payment submitted**\n\nAmount: ${payment.amountStr} USDC\nRecipient: \`${payment.beneficiary}\`\nCircle TxID: \`${txId}\`\n\nCircle is processing the transaction. I’ll update you when it reaches a final status.`, {
             parse_mode: "Markdown"
         });

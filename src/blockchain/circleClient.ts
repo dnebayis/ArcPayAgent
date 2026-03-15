@@ -106,12 +106,12 @@ export class CircleClient {
         };
     }
 
-    async createTransaction(walletId: string, to: string, encodedData: string): Promise<string> {
+    async createTransaction(walletId: string, to: string, encodedData: string, idempotencyKey?: string): Promise<string> {
         const cipherText = await this.getEntitySecretCiphertext();
-        const idempotencyKey = uuidv4();
+        const requestIdempotencyKey = idempotencyKey || uuidv4();
 
         const exactUserPayload = {
-            idempotencyKey,
+            idempotencyKey: requestIdempotencyKey,
             entitySecretCiphertext: cipherText,
             walletId,
             contractAddress: to,
