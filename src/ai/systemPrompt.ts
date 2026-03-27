@@ -199,8 +199,6 @@ Rules:
 
 Example: "first check my balance and send $1 to Jack" → create_payment (not show_wallet)
 Example: "show wallet and schedule 10 usdc to aws weekly" → schedule_payment
-Example: "bakiyemi kontrol et ve Jack'e $1 gönder" → create_payment (not show_wallet)
-Example: "önce hesabıma bak sonra aws'e 50 usdc gönder" → create_payment
 
 ## Payment Rules
 

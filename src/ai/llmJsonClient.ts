@@ -33,7 +33,7 @@ function formatNetworkError(error: unknown): string {
     return String(error);
 }
 
-async function postJsonWithRetry(url: string, init: RequestInit): Promise<Response | null> {
+async function postJsonWithRetry(url: string, init: RequestInit, provider?: string): Promise<Response | null> {
     for (let attempt = 1; attempt <= DEFAULT_LLM_HTTP_RETRIES; attempt += 1) {
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), DEFAULT_LLM_HTTP_TIMEOUT_MS);
@@ -44,11 +44,14 @@ async function postJsonWithRetry(url: string, init: RequestInit): Promise<Respon
             });
         } catch (error) {
             const isLastAttempt = attempt === DEFAULT_LLM_HTTP_RETRIES;
-            console.error(`[LLM JSON] network error on attempt ${attempt}/${DEFAULT_LLM_HTTP_RETRIES}: ${formatNetworkError(error)}`);
+            const providerTag = provider ? ` [${provider}]` : "";
+            console.error(`[LLM JSON]${providerTag} network error on attempt ${attempt}/${DEFAULT_LLM_HTTP_RETRIES}: ${formatNetworkError(error)}`);
             if (isLastAttempt) {
                 return null;
             }
-            await sleep(250 * attempt);
+            // Wait longer on timeout/abort to avoid hammering an overloaded provider
+            const isAbort = error instanceof Error && error.name === "AbortError";
+            await sleep(isAbort ? 3000 : 500 * attempt);
         } finally {
             clearTimeout(timeout);
         }
@@ -91,7 +94,7 @@ async function callOpenAICompatible(auth: LLMAuthConfig, messages: LLMJsonMessag
             messages,
             response_format: { type: "json_object" }
         })
-    });
+    }, auth.provider);
 
     if (!response) {
         return null;
@@ -126,7 +129,7 @@ async function callAnthropic(auth: LLMAuthConfig, systemContent: string, message
                     content: message.content
                 }))
         })
-    });
+    }, "anthropic");
 
     if (!response) {
         return null;
@@ -134,7 +137,7 @@ async function callAnthropic(auth: LLMAuthConfig, systemContent: string, message
 
     if (!response.ok) {
         const errorBody = await response.text();
-        console.error(`[LLM JSON] API error ${response.status}: ${errorBody.substring(0, 200)}`);
+        console.error(`[LLM JSON] [anthropic] API error ${response.status}: ${errorBody.substring(0, 200)}`);
         return null;
     }
 
@@ -164,7 +167,7 @@ async function callGemini(auth: LLMAuthConfig, systemContent: string, messages: 
                 responseMimeType: "application/json"
             }
         })
-    });
+    }, "gemini");
 
     if (!response) {
         return null;
@@ -172,7 +175,7 @@ async function callGemini(auth: LLMAuthConfig, systemContent: string, messages: 
 
     if (!response.ok) {
         const errorBody = await response.text();
-        console.error(`[LLM JSON] API error ${response.status}: ${errorBody.substring(0, 200)}`);
+        console.error(`[LLM JSON] [gemini] API error ${response.status}: ${errorBody.substring(0, 200)}`);
         return null;
     }
 
