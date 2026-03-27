@@ -53,14 +53,27 @@ export class Orchestrator {
      */
     private static readonly CANCEL_PATTERN = /^(cancel|iptal|iptal et|vazgeç|hayır|no|dur|stop|leave it)$/i;
 
+    /**
+     * Payment modification during pending payment (e.g. "not 1 eurc, send 10 eurc", "actually make it 50").
+     * These should be blocked while a payment is awaiting confirmation.
+     */
+    private static readonly PAYMENT_MODIFY_PATTERN = /\b\d+(\.\d+)?\s*(usdc|eurc)\b|\b(not|instead|change|make it|actually)\b/i;
+
+    /**
+     * Capability queries — intercepted before the LLM to prevent agent_status misrouting.
+     * "what can you do?", "create a detailed list of your features", etc.
+     */
+    private static readonly CAPABILITY_PATTERN = /\bwhat\s+(can|do)\s+you\b|\bwhat\s+are\s+you\b|\b(list|show|give|create)\b.{0,40}\b(what\s+you\s+can|capabilities|features|functions|abilities)\b|\bdetailed\s+list\b|\byour\s+(capabilities|features|functions|abilities)\b/i;
+
+    private static readonly CAPABILITY_MESSAGE = "Here's what I can do:\n• Send USDC and EURC payments instantly\n• Schedule one-time or recurring payments\n• Save and manage vendors\n• Analyze invoice PDFs and photos for risk\n• Show spending reports, payment history, monthly breakdowns\n• Look up live crypto prices and fiat FX rates\n• Watch your wallet for incoming payment notifications\n• Set price alerts (e.g., \"alert me when BTC hits $100k\")\n• Answer questions about Arc and Circle\n• Show your on-chain activity on Arc Testnet\n\nWhat would you like to do?";
+
     async handleMessage(chatId: number, text: string): Promise<void> {
         if (!text?.trim()) return;
 
         this.memory.addUserMessage(chatId, text);
 
         // ── Pending-payment guard ──────────────────────────────────────────────
-        // When a payment card is on-screen, intercept pure confirm/cancel text
-        // before it reaches the LLM — the LLM reliably re-creates the payment.
+        // When a payment card is on-screen, intercept text before it reaches the LLM.
         const lastAction = this.memory.getContext(chatId).lastAction;
         if (lastAction === "create_payment") {
             const trimmed = text.trim();
@@ -76,6 +89,24 @@ export class Orchestrator {
                 this.memory.addBotMessage(chatId, msg);
                 return;
             }
+            // Guard B: payment correction / modification attempt while payment is pending.
+            // "not 1 eurc send 10 eurc", "actually make it 50 usdc" etc. must not silently
+            // overwrite the pending payment — tell the user to cancel first.
+            if (Orchestrator.PAYMENT_MODIFY_PATTERN.test(trimmed)) {
+                const msg = "There's already a payment waiting for confirmation. Please use the **Cancel** button above to cancel it first, then I can process your new request.";
+                await this.bot.sendMessage(chatId, msg, { parse_mode: "Markdown" });
+                this.memory.addBotMessage(chatId, msg);
+                return;
+            }
+        }
+
+        // ── Capability query guard ─────────────────────────────────────────────
+        // Intercept "what can you do?" / "create a detailed list" etc. before the LLM
+        // to prevent misrouting to agent_status.
+        if (Orchestrator.CAPABILITY_PATTERN.test(text.trim())) {
+            await this.bot.sendMessage(chatId, Orchestrator.CAPABILITY_MESSAGE);
+            this.memory.addBotMessage(chatId, Orchestrator.CAPABILITY_MESSAGE);
+            return;
         }
 
         const auth = this.llmKeyStore.getKey(chatId);
@@ -126,6 +157,21 @@ export class Orchestrator {
             await this.bot.sendMessage(chatId, errMsg);
             this.memory.addBotMessage(chatId, errMsg);
             return;
+        }
+
+        // ── Guard C: missing amount for create_payment ────────────────────────
+        // LLM sometimes invents amounts or silently reuses lastPayment context.
+        // Enforce that amount is always explicitly provided before dispatching.
+        if (intent.action === "create_payment") {
+            const amount = Number(intent.amount);
+            if (!intent.amount || isNaN(amount) || amount <= 0) {
+                const token = intent.token ?? "USDC";
+                const beneficiary = intent.beneficiary ? ` to ${String(intent.beneficiary)}` : "";
+                const msg = `How much ${token} would you like to send${beneficiary}?`;
+                await this.bot.sendMessage(chatId, msg);
+                this.memory.addBotMessage(chatId, msg);
+                return; // do NOT dispatch, do NOT update lastAction
+            }
         }
 
         if (!intent.action) {
