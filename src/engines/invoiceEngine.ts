@@ -748,17 +748,17 @@ export class InvoiceEngine {
     async extractTextFromPDF(buffer: Buffer): Promise<string> {
         try {
             // eslint-disable-next-line @typescript-eslint/no-require-imports
-            const pdfParse = require("pdf-parse") as (buf: Buffer) => Promise<{ text: string }>;
-            const result = await pdfParse(buffer);
+            const { PDFParse } = require("pdf-parse") as { PDFParse: new (opts: { data: Buffer }) => { getText(): Promise<{ text: string }> } };
+            const parser = new PDFParse({ data: buffer });
+            const result = await parser.getText();
             const text = result.text || "";
-            console.log(`[Invoice] PDF text extracted: ${text.length} chars`);
+            console.log(`[Invoice] PDF extracted ${text.trim().length} chars — preview: ${JSON.stringify(text.substring(0, 300))}`);
 
-            if (text.trim().length > 20) {
-                console.log(`[Invoice] PDF text preview: ${text.substring(0, 200)}`);
+            if (text.trim().length > 0) {
                 return text;
             }
 
-            console.log("[Invoice] PDF text too short — likely a scanned PDF.");
+            console.log("[Invoice] PDF yielded no text — likely a scanned/image PDF.");
         } catch (err: any) {
             console.log(`[Invoice] PDF parse failed: ${err.message}`);
         }
