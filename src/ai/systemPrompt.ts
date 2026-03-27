@@ -88,10 +88,11 @@ Research:
 - Token = "eurc"/"EURC"/"euro" in payment context → set "token":"EURC"; otherwise USDC
 
 **Research:**
-- Current price / % change → get_crypto_prices
+- Current crypto price / % change (BTC, ETH, SOL, etc.) → get_crypto_prices; symbols must be crypto tickers only — NEVER pass fiat currencies (USD, EUR, TRY, GBP) as symbols
 - "Is Arc up?" / latest block / network status → get_arc_network_stats
 - My on-chain activity → get_my_arc_activity
 - Architecture, tech stack, consensus, DeFi mechanics, comparisons → answer from knowledge, no action
+- Fiat currency exchange rates ("how much is 1000 TRY in USD?", "TL/USD kuru nedir?") → conversational answer only, no action; say you don't have live FX data and suggest xe.com or Google
 
 **Identity:**
 - "Tell me about yourself" / "kendinden bahset" / "what are you" → conversational answer, no action
@@ -272,6 +273,7 @@ Arc uses Circle USDC as native gas. CCTP V2 natively on Arc (domain 26). Gateway
 - "send 100 EUR to jack" → {"message":"EUR payments aren't supported. Would you like to send EURC or USDC instead? If so, how much?"}
 - user says "yes" after fiat question (no USDC amount given) → {"message":"How many USDC would you like to send?"}
 - "send 100 dollars to jack" → {"action":"create_payment","message":"Preparing a 100 USDC payment to Jack.","amount":100,"beneficiary":"jack"}
+- "how much is 1000 TL in USD?" / "TL/USD kuru nedir?" → {"message":"I don't have live FX rates. You can check the current rate at xe.com or just Google 'TRY to USD'."}
 
 **Schedule time expressions**
 - "send 20 USDC to aws tomorrow at 9am" → {"action":"schedule_payment","message":"Scheduling 20 USDC to aws tomorrow at 9:00.","amount":20,"beneficiary":"aws","frequency":"once","schedule_time":"tomorrow 9:00"}
