@@ -7,6 +7,8 @@ import { VendorStore } from "../storage/vendorStore";
 import { WalletStore } from "../storage/walletStore";
 import { ScheduleStore } from "../storage/schedules";
 import { UserPreferencesStore } from "../storage/userPreferences";
+import { WatchStore } from "../storage/watchStore";
+import { AlertStore } from "../storage/alertStore";
 import { InternalToolset } from "./internalTools";
 import { ConversationMemory } from "./conversationMemory";
 import { USDC } from "../blockchain/usdc";
@@ -24,9 +26,12 @@ interface ToolDispatcherDeps {
     walletStore: WalletStore;
     scheduleStore: ScheduleStore;
     userPreferencesStore: UserPreferencesStore;
+    watchStore: WatchStore;
+    alertStore: AlertStore;
     internalTools: InternalToolset;
     memory: ConversationMemory;
     usdc: USDC;
+    eurc: USDC;
 }
 
 export class ToolDispatcher {
@@ -329,6 +334,123 @@ export class ToolDispatcher {
                 if (!intent.message) {
                     await this.reply(chatId, "Please send me the invoice as a PDF or photo and I'll analyze it for you.");
                 }
+                break;
+            }
+
+            // ── Incoming payment watch ─────────────────────────────────
+            case "watch_payments_enable": {
+                const { watchStore, walletStore: ws, usdc, eurc } = this.deps;
+                if (!ws.hasWallet(chatId)) {
+                    await this.reply(chatId, "You need a wallet first. Use `create wallet` to set one up.", { parse_mode: "Markdown" });
+                    return;
+                }
+                const addr = ws.getWalletAddress(chatId)!;
+                try {
+                    const [usdcBal, eurcBal] = await Promise.all([
+                        usdc.balanceOf(addr),
+                        eurc.balanceOf(addr)
+                    ]);
+                    watchStore.enable(chatId, addr, usdcBal.toString(), eurcBal.toString());
+                    await this.reply(chatId, "✅ **Incoming payment notifications enabled.**\n\nI'll notify you whenever USDC or EURC arrives in your wallet.", { parse_mode: "Markdown" });
+                } catch (err: any) {
+                    await this.reply(chatId, `❌ Failed to enable watch: ${err.message}`);
+                }
+                break;
+            }
+
+            case "watch_payments_disable": {
+                const { watchStore } = this.deps;
+                const disabled = watchStore.disable(chatId);
+                await this.reply(chatId, disabled
+                    ? "🔕 Incoming payment notifications disabled."
+                    : "Incoming payment notifications were not enabled."
+                );
+                break;
+            }
+
+            case "watch_payments_status": {
+                const { watchStore } = this.deps;
+                const enabled = watchStore.isEnabled(chatId);
+                await this.reply(chatId, enabled
+                    ? "✅ Incoming payment notifications are **enabled**. I'll notify you when USDC or EURC arrives."
+                    : "🔕 Incoming payment notifications are **disabled**. Say `watch my wallet` to enable them.",
+                    { parse_mode: "Markdown" }
+                );
+                break;
+            }
+
+            // ── Price alerts ───────────────────────────────────────────
+            case "set_price_alert": {
+                const { alertStore } = this.deps;
+                const symbol = intent.symbol ? String(intent.symbol).toUpperCase() : null;
+                const alertPrice = intent.alert_price != null ? Number(intent.alert_price) : null;
+                const rawDir = intent.alert_direction ? String(intent.alert_direction) : null;
+                const direction: "above" | "below" | null = (rawDir === "above" || rawDir === "below") ? rawDir : null;
+
+                if (!symbol || !alertPrice || !direction) {
+                    await this.reply(chatId, "I need a symbol, target price, and direction. Example: `alert me when BTC goes above $100000`", { parse_mode: "Markdown" });
+                    return;
+                }
+
+                const alert = alertStore.createAlert(chatId, symbol, alertPrice, direction);
+                const dirWord = direction === "above" ? "rises above" : "drops below";
+                await this.reply(chatId,
+                    `🔔 **Price alert set**\n\nI'll notify you when **${symbol}** ${dirWord} $${alertPrice.toLocaleString("en-US")}.\nAlert ID: \`${alert.id}\``,
+                    { parse_mode: "Markdown" }
+                );
+                break;
+            }
+
+            case "list_price_alerts": {
+                const { alertStore } = this.deps;
+                const alerts = alertStore.getAlerts(chatId);
+                if (!alerts.length) {
+                    await this.reply(chatId, "No active price alerts. Say `alert me when BTC hits $X` to set one.", { parse_mode: "Markdown" });
+                    return;
+                }
+                let msg = "🔔 **Active Price Alerts**\n\n";
+                for (const a of alerts) {
+                    const dirWord = a.direction === "above" ? "↑ above" : "↓ below";
+                    msg += `• \`${a.id}\` **${a.symbol}** ${dirWord} $${a.targetPrice.toLocaleString("en-US")}\n`;
+                }
+                await this.reply(chatId, msg, { parse_mode: "Markdown" });
+                break;
+            }
+
+            case "remove_price_alert": {
+                const { alertStore } = this.deps;
+                const alertId = intent.name ? String(intent.name) : null;
+                if (!alertId) {
+                    const alerts = alertStore.getAlerts(chatId);
+                    if (!alerts.length) {
+                        await this.reply(chatId, "No active price alerts to remove.");
+                        return;
+                    }
+                    let msg = "Which alert would you like to remove?\n\n";
+                    for (const a of alerts) {
+                        const dirWord = a.direction === "above" ? "↑ above" : "↓ below";
+                        msg += `• \`${a.id}\` ${a.symbol} ${dirWord} $${a.targetPrice.toLocaleString("en-US")}\n`;
+                    }
+                    msg += "\nSay `remove alert <id>` to remove one.";
+                    await this.reply(chatId, msg, { parse_mode: "Markdown" });
+                    return;
+                }
+                const removed = alertStore.removeAlert(chatId, alertId);
+                await this.reply(chatId, removed
+                    ? `✅ Price alert \`${alertId}\` removed.`
+                    : `Alert \`${alertId}\` not found.`,
+                    { parse_mode: "Markdown" }
+                );
+                break;
+            }
+
+            case "remove_all_price_alerts": {
+                const { alertStore } = this.deps;
+                const count = alertStore.removeAllAlerts(chatId);
+                await this.reply(chatId, count > 0
+                    ? `✅ All ${count} price alert${count === 1 ? "" : "s"} removed.`
+                    : "No active price alerts to remove."
+                );
                 break;
             }
 

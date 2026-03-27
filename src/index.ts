@@ -24,6 +24,10 @@ import { PendingPaymentStore } from "./storage/pendingPayments";
 import { SubmittedTransactionStore } from "./storage/submittedTransactions";
 import { ARC_TESTNET_RPC_URL, getExpectedArcChainId } from "./blockchain/arcConfig";
 import { SchedulerService } from "./services/scheduler";
+import { WatchStore } from "./storage/watchStore";
+import { AlertStore } from "./storage/alertStore";
+import { WatchService } from "./services/watchService";
+import { AlertService } from "./services/alertService";
 import { flushPersistence, getPersistenceBackend, initializePersistence } from "./storage/persistence";
 import { markBotReady, markPersistenceReady, markRpcReady, markRpcUnavailable, markSchedulerReady } from "./appStatus";
 import { UserPreferencesStore } from "./storage/userPreferences";
@@ -170,6 +174,8 @@ export async function main() {
 
     const conversationMemory = new ConversationMemory();
     const scheduleStore = new ScheduleStore();
+    const watchStore = new WatchStore();
+    const alertStore = new AlertStore();
 
     // ── Memory callback — syncs engine messages to conversation history ───
     const onEngineMessage = (chatId: number, msg: string) => conversationMemory.addBotMessage(chatId, msg);
@@ -179,6 +185,7 @@ export async function main() {
     const paymentRequestEngine = new PaymentRequestEngine(bot, paymentRequestStore, walletStore, botUsername, onEngineMessage);
     const analyticsEngine = new AnalyticsEngine(bot, paymentLogStore, onEngineMessage);
     const schedulerService = new SchedulerService(bot, scheduleStore, null as any, userPreferencesStore);
+    const watchService = new WatchService(bot, watchStore, usdc, eurc);
 
     const agentIdentityEngine = new AgentIdentityEngine(circleAgentClient, erc8004Client, agentIdentityStore, {
         metadataUri: config.ARC_AGENT_METADATA_URI,
@@ -279,6 +286,7 @@ export async function main() {
 
     // ── New AI architecture ──────────────────────────────────────────────────
     const researchTools = new ResearchTools(provider, routerReader, routerAddress);
+    const alertService = new AlertService(bot, alertStore, researchTools);
 
     const toolDispatcher = new ToolDispatcher({
         bot,
@@ -289,9 +297,12 @@ export async function main() {
         walletStore,
         scheduleStore,
         userPreferencesStore,
+        watchStore,
+        alertStore,
         internalTools: internalToolset,
         memory: conversationMemory,
-        usdc
+        usdc,
+        eurc
     });
 
     const orchestrator = new Orchestrator(
@@ -324,6 +335,8 @@ export async function main() {
         setInterval(() => { void paymentEngine.reconcileSubmittedTransactions(); }, 5000);
         setInterval(() => { paymentEngine.expireOldPendingPayments(); }, 60 * 1000);
         schedulerService.start();
+        watchService.start();
+        alertService.start();
         markSchedulerReady();
     }
 
