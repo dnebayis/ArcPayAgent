@@ -27,6 +27,8 @@ export interface ParsedIntent {
     memo?: string;
     symbols?: string[];
     token?: "USDC" | "EURC";
+    from?: string;
+    to?: string;
     [key: string]: unknown;
 }
 

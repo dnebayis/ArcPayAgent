@@ -19,10 +19,19 @@ export interface UserArcActivity {
     txList: { hash: string; timestamp: number; direction: "in" | "out" }[];
 }
 
+export interface FxRateData {
+    from: string;
+    to: string;
+    amount: number;
+    result: number;
+    date: string;
+}
+
 export type ResearchData =
     | { type: "crypto_prices"; prices: CryptoPriceData[] }
     | { type: "arc_network_stats"; stats: ArcNetworkStats }
     | { type: "user_arc_activity"; activity: UserArcActivity }
+    | { type: "fx_rate"; fx: FxRateData }
     | { type: "error"; message: string };
 
 export interface ResearchIntent {
@@ -31,7 +40,7 @@ export interface ResearchIntent {
     [key: string]: unknown;
 }
 
-const RESEARCH_ACTIONS = ["get_crypto_prices", "get_arc_network_stats", "get_my_arc_activity"] as const;
+const RESEARCH_ACTIONS = ["get_crypto_prices", "get_arc_network_stats", "get_my_arc_activity", "get_fx_rate"] as const;
 type ResearchAction = typeof RESEARCH_ACTIONS[number];
 
 export class ResearchTools {
@@ -54,6 +63,12 @@ export class ResearchTools {
                     return await this.getArcNetworkStats();
                 case "get_my_arc_activity":
                     return await this.getUserArcActivity(walletAddress);
+                case "get_fx_rate":
+                    return await this.getFxRate(
+                        String(intent.from || "USD").toUpperCase(),
+                        String(intent.to || "USD").toUpperCase(),
+                        Number(intent.amount ?? 1)
+                    );
                 default:
                     return { type: "error", message: `Unknown research action: ${intent.action}` };
             }
@@ -161,6 +176,37 @@ export class ResearchTools {
         }
     }
 
+    private async getFxRate(from: string, to: string, amount: number): Promise<ResearchData> {
+        const url = `https://api.frankfurter.app/latest?from=${from}&to=${to}&amount=${amount}`;
+
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 8000);
+
+        try {
+            const response = await fetch(url, { signal: controller.signal });
+            clearTimeout(timeout);
+
+            if (!response.ok) {
+                throw new Error(`Frankfurter API error: ${response.status}`);
+            }
+
+            const data = await response.json() as { amount: number; base: string; date: string; rates: Record<string, number> };
+            const result = data.rates[to];
+
+            if (result === undefined) {
+                throw new Error(`Currency ${to} not found in response`);
+            }
+
+            return {
+                type: "fx_rate",
+                fx: { from, to, amount, result, date: data.date }
+            };
+        } catch (error: any) {
+            clearTimeout(timeout);
+            throw error;
+        }
+    }
+
     private normalizeCoinId(input: string): string {
         const mapping: Record<string, string> = {
             "btc": "bitcoin",
@@ -231,6 +277,12 @@ export class ResearchTools {
         if (data.type === "arc_network_stats") {
             const { stats } = data;
             return `Arc Network Stats:\nNetwork: ${stats.networkName}\nLatest block: ${stats.latestBlock ?? "unavailable"}`;
+        }
+
+        if (data.type === "fx_rate") {
+            const { fx } = data;
+            const formatted = fx.result.toLocaleString("en-US", { maximumFractionDigits: 4 });
+            return `FX rate (ECB, ${fx.date}):\n${fx.amount} ${fx.from} = ${formatted} ${fx.to}`;
         }
 
         if (data.type === "user_arc_activity") {
