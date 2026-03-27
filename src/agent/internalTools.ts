@@ -56,6 +56,7 @@ interface InternalToolDependencies {
     invoiceEngine: InvoiceEngine;
     conversationMemory?: ConversationMemory;
     usdc: USDC;
+    eurc?: USDC;
     agentIdentityEngine?: AgentIdentityEngine;
     pendingPaymentStore?: PendingPaymentStore;
 }
@@ -178,13 +179,19 @@ export class InternalToolset {
             };
         }
 
-        const balance = await this.deps.usdc.balanceOf(address);
+        const [usdcBalance, eurcBalance] = await Promise.all([
+            this.deps.usdc.balanceOf(address),
+            this.deps.eurc ? this.deps.eurc.balanceOf(address) : Promise.resolve(0n)
+        ]);
+        const usdcFormatted = ethers.formatUnits(usdcBalance, 6);
+        const eurcFormatted = ethers.formatUnits(eurcBalance, 6);
         return {
             status: "success",
-            summary: `Wallet ${address} currently holds ${ethers.formatUnits(balance, 6)} USDC.`,
+            summary: `Wallet ${address} holds ${usdcFormatted} USDC and ${eurcFormatted} EURC.`,
             data: {
                 address,
-                balance: ethers.formatUnits(balance, 6)
+                balance: usdcFormatted,
+                eurcBalance: eurcFormatted
             },
             references: {
                 address
@@ -215,16 +222,21 @@ export class InternalToolset {
             };
         }
 
-        const balance = await this.deps.usdc.balanceOf(address).catch(() => 0n);
+        const [balance, eurcBalance] = await Promise.all([
+            this.deps.usdc.balanceOf(address).catch(() => 0n),
+            this.deps.eurc ? this.deps.eurc.balanceOf(address).catch(() => 0n) : Promise.resolve(0n)
+        ]);
         const lastPayment = recentPayments[recentPayments.length - 1];
         const recipient = lastPayment ? this.resolvePaymentRecipient(chatId, lastPayment) : null;
+        const lastPayToken = lastPayment?.token ?? "USDC";
 
         return {
             status: "success",
-            summary: `Account snapshot: wallet ${address} holds ${ethers.formatUnits(balance, 6)} USDC. In the last 30 days you've spent ${spent30d} USDC, recorded ${recordedPayments} payments, saved ${vendorCount} vendors, and have ${activeSchedules} active schedules.${topVendor ? ` Top vendor: ${topVendor.vendor} (${topVendor.total} USDC).` : ""}${recipient && lastPayment ? ` Latest payment: ${lastPayment.amount} USDC to ${recipient.label}.` : ""}`,
+            summary: `Account snapshot: wallet ${address} holds ${ethers.formatUnits(balance, 6)} USDC and ${ethers.formatUnits(eurcBalance, 6)} EURC. In the last 30 days you've spent ${spent30d} USDC, recorded ${recordedPayments} payments, saved ${vendorCount} vendors, and have ${activeSchedules} active schedules.${topVendor ? ` Top vendor: ${topVendor.vendor} (${topVendor.total} USDC).` : ""}${recipient && lastPayment ? ` Latest payment: ${lastPayment.amount} ${lastPayToken} to ${recipient.label}.` : ""}`,
             data: {
                 address,
                 balance: ethers.formatUnits(balance, 6),
+                eurcBalance: ethers.formatUnits(eurcBalance, 6),
                 spent30d,
                 recordedPayments,
                 vendorCount,
@@ -341,10 +353,11 @@ export class InternalToolset {
 
         const last = resolvedPayments[resolvedPayments.length - 1];
         const target = last.vendor || last.address;
+        const lastToken = last.token ?? "USDC";
         return {
             status: "success",
             summary: target
-                ? `The latest recorded payment was ${last.amount} USDC to ${target}.`
+                ? `The latest recorded payment was ${last.amount} ${lastToken} to ${target}.`
                 : "I found recent payments, but I couldn't resolve the latest recipient cleanly.",
             data: {
                 payments: resolvedPayments
@@ -367,9 +380,10 @@ export class InternalToolset {
             };
         }
 
+        const pendingToken = pending.token ?? "USDC";
         return {
             status: "success",
-            summary: `There is a payment waiting for confirmation: ${pending.amountStr} USDC${pending.vendorName ? ` to ${pending.vendorName}` : ""}.`,
+            summary: `There is a payment waiting for confirmation: ${pending.amountStr} ${pendingToken}${pending.vendorName ? ` to ${pending.vendorName}` : ""}.`,
             data: {
                 pending
             },

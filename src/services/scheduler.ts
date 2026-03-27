@@ -44,7 +44,8 @@ export class SchedulerService {
         }
 
         for (const { chatId, schedule } of due) {
-            console.log(`[Scheduler] Due: ${schedule.amount} USDC → ${schedule.vendor} for chatId=${chatId}`);
+            const schedToken = schedule.token ?? "USDC";
+            console.log(`[Scheduler] Due: ${schedule.amount} ${schedToken} → ${schedule.vendor} for chatId=${chatId}`);
 
             const freqLabel = schedule.frequency === "once" ? "" : ` (${schedule.frequency})`;
             const preferences = this.userPreferencesStore.getPreferences(chatId);
@@ -52,7 +53,7 @@ export class SchedulerService {
 
             this.bot.sendMessage(
                 chatId,
-                `⏰ **Scheduled payment due**${freqLabel}\n\nAmount: ${schedule.amount} USDC\nRecipient: **${escapeTelegramMarkdown(schedule.vendor)}**\nScheduled for: ${scheduledFor}\n\nChoose an action below.`,
+                `⏰ **Scheduled payment due**${freqLabel}\n\nAmount: ${schedule.amount} ${schedToken}\nRecipient: **${escapeTelegramMarkdown(schedule.vendor)}**\nScheduled for: ${scheduledFor}\n\nChoose an action below.`,
                 {
                     parse_mode: "Markdown",
                     reply_markup: {

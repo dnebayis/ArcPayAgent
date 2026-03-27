@@ -17,6 +17,7 @@ export interface Schedule {
     awaitingAction?: boolean;
     notificationSentAt?: number | null;
     lastExecutionAt?: number | null;
+    token?: "USDC" | "EURC";
 }
 
 export interface UserSchedules {
@@ -40,7 +41,8 @@ export class ScheduleStore {
         address: string,
         amount: number,
         nextExecution: number,
-        frequency: ScheduleFrequency = "once"
+        frequency: ScheduleFrequency = "once",
+        token?: "USDC" | "EURC"
     ): Schedule {
         const id = chatId.toString();
         if (!this.store[id]) {
@@ -58,7 +60,8 @@ export class ScheduleStore {
             createdAt: Date.now(),
             awaitingAction: false,
             notificationSentAt: null,
-            lastExecutionAt: null
+            lastExecutionAt: null,
+            token: token ?? "USDC"
         };
 
         this.store[id].schedules.push(schedule);

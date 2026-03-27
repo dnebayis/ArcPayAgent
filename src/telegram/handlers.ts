@@ -439,6 +439,7 @@ Follow us: @ArcPayAgent`;
                     schedule.amount.toString(),
                     "Scheduled",
                     {
+                        token: schedule.token ?? "USDC",
                         source: {
                             type: "schedule",
                             scheduleId,

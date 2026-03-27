@@ -108,14 +108,20 @@ export class InvoiceEngine {
     }> {
         const normalizedDetectedCurrency = currency ? currency.toUpperCase() : null;
         const detectedAmount = amount;
-        const settlementCurrency = "USDC";
+        let settlementCurrency: string;
         let settlementAmount: string | null = null;
 
-        if (detectedAmount && normalizedDetectedCurrency) {
-            try {
-                settlementAmount = await this.fxRateService.convertToUsd(detectedAmount, normalizedDetectedCurrency);
-            } catch (error) {
-                console.error("[Invoice] FX conversion failed:", error);
+        if (normalizedDetectedCurrency === "EURC") {
+            settlementCurrency = "EURC";
+            settlementAmount = detectedAmount;
+        } else {
+            settlementCurrency = "USDC";
+            if (detectedAmount && normalizedDetectedCurrency) {
+                try {
+                    settlementAmount = await this.fxRateService.convertToUsd(detectedAmount, normalizedDetectedCurrency);
+                } catch (error) {
+                    console.error("[Invoice] FX conversion failed:", error);
+                }
             }
         }
 

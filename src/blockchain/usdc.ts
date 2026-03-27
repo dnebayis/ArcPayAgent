@@ -1,9 +1,12 @@
 import { ethers } from "ethers";
 
+export type PaymentToken = "USDC" | "EURC";
+
 const ERC20_ABI = [
     "function allowance(address owner, address spender) view returns (uint256)",
     "function approve(address spender, uint256 amount) returns (bool)",
-    "function balanceOf(address account) view returns (uint256)"
+    "function balanceOf(address account) view returns (uint256)",
+    "function transfer(address to, uint256 amount) returns (bool)"
 ];
 
 export class USDC {
@@ -28,6 +31,10 @@ export class USDC {
 
     async balanceOf(walletAddress: string): Promise<bigint> {
         return await this.contract.balanceOf(walletAddress);
+    }
+
+    encodeTransfer(toAddress: string, amount: bigint): string {
+        return this.contract.interface.encodeFunctionData("transfer", [toAddress, amount]);
     }
 
     getAddress(): string {

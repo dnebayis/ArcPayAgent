@@ -57,7 +57,8 @@ export class ToolDispatcher {
                     }
                     return;
                 }
-                await paymentEngine.preparePayment(chatId, beneficiary, amount, intent.memo ? String(intent.memo) : "ArcPay", { origin: "byok" });
+                const token = (intent.token === "EURC") ? "EURC" : "USDC";
+                await paymentEngine.preparePayment(chatId, beneficiary, amount, intent.memo ? String(intent.memo) : "ArcPay", { origin: "byok", token });
                 if (beneficiary) memory.setLastPayment(chatId, beneficiary, String(amount));
                 break;
             }
@@ -85,7 +86,7 @@ export class ToolDispatcher {
                         return;
                     }
                     const list = schedules.map(s =>
-                        `• \`${s.id}\` — ${s.amount} USDC to ${escapeTelegramMarkdown(s.vendor)} (${s.frequency})`
+                        `• \`${s.id}\` — ${s.amount} ${s.token ?? "USDC"} to ${escapeTelegramMarkdown(s.vendor)} (${s.frequency})`
                     ).join("\n");
                     await this.reply(chatId, `Which schedule would you like to cancel?\n\n${list}\n\nSay \`cancel schedule <id>\` to cancel one.`, { parse_mode: "Markdown" });
                     return;
@@ -377,12 +378,13 @@ export class ToolDispatcher {
             ? intent.frequency as "once" | "weekly" | "monthly"
             : "once");
 
-        const schedule = scheduleStore.createSchedule(chatId, beneficiary, scheduleAddress, amount, nextExecution, frequency);
+        const scheduleToken = (intent.token === "EURC") ? "EURC" : "USDC";
+        const schedule = scheduleStore.createSchedule(chatId, beneficiary, scheduleAddress, amount, nextExecution, frequency, scheduleToken);
         memory.setLastSchedule(chatId, schedule.vendor, schedule.amount.toString(), schedule.nextExecution, schedule.id);
 
         const preferences = userPreferencesStore.getPreferences(chatId);
 
-        const msg = `✅ **Scheduled payment created**\n\nAmount: ${schedule.amount} USDC\nRecipient: **${escapeTelegramMarkdown(schedule.vendor)}**\nExecution: ${formatUserDateTime(schedule.nextExecution, preferences)}\nFrequency: ${schedule.frequency}\nID: \`${schedule.id}\``;
+        const msg = `✅ **Scheduled payment created**\n\nAmount: ${schedule.amount} ${schedule.token ?? "USDC"}\nRecipient: **${escapeTelegramMarkdown(schedule.vendor)}**\nExecution: ${formatUserDateTime(schedule.nextExecution, preferences)}\nFrequency: ${schedule.frequency}\nID: \`${schedule.id}\``;
         await this.reply(chatId, msg, { parse_mode: "Markdown" });
     }
 }

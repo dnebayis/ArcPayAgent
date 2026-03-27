@@ -26,6 +26,7 @@ export interface ParsedIntent {
     frequency?: string;
     memo?: string;
     symbols?: string[];
+    token?: "USDC" | "EURC";
     [key: string]: unknown;
 }
 

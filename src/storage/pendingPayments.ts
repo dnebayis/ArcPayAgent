@@ -22,6 +22,7 @@ export interface PersistedPendingPayment {
     memo: string | null;
     source?: PendingPaymentSource;
     createdAt?: number;
+    token?: "USDC" | "EURC";
 }
 
 export class PendingPaymentStore {

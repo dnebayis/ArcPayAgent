@@ -20,6 +20,7 @@ export interface SubmittedTransactionRecord {
     memo: string | null;
     source?: PendingPaymentSource;
     submittedAt: number;
+    token?: "USDC" | "EURC";
 }
 
 export class SubmittedTransactionStore {

@@ -9,6 +9,7 @@ export interface PaymentLogEntry {
     timestamp: number;
     memo: string;
     txHash: string;
+    token?: "USDC" | "EURC";
 }
 
 export interface UserPaymentLogs {

@@ -85,6 +85,7 @@ export async function main() {
 
     const providerUrl = config.ARC_RPC_URL;
     const usdcAddress = config.USDC_ADDRESS;
+    const eurcAddress = config.EURC_ADDRESS;
     const routerAddress = config.PAYABLES_ROUTER_ADDRESS;
 
     const provider = new ethers.JsonRpcProvider(providerUrl);
@@ -158,6 +159,7 @@ export async function main() {
     );
 
     const usdc = new USDC(provider, usdcAddress);
+    const eurc = new USDC(provider, eurcAddress);
     const router = new ArcRouter(provider, routerAddress);
     const routerReader = new RouterReader(provider, routerAddress);
     const erc8004Client = new ERC8004Client(provider, {
@@ -225,7 +227,8 @@ export async function main() {
             if (source.type === "schedule" && source.scheduleId) {
                 scheduleStore.markExecuted(chatId, source.scheduleId);
                 if (source.originChatId && source.originMessageId) {
-                    bot.editMessageText(`✅ Scheduled payment completed: ${payment.amountStr} USDC → ${payment.vendorName || payment.beneficiary}`, {
+                    const schedPayToken = payment.token ?? "USDC";
+                    bot.editMessageText(`✅ Scheduled payment completed: ${payment.amountStr} ${schedPayToken} → ${payment.vendorName || payment.beneficiary}`, {
                         chat_id: source.originChatId,
                         message_id: source.originMessageId
                     }).catch(() => { });
@@ -236,7 +239,8 @@ export async function main() {
             if (source.type === "invoice") {
                 invoiceEngine.markSessionPaid(chatId, source.invoiceSessionId);
                 if (source.originChatId && source.originMessageId) {
-                    bot.editMessageText(`✅ Invoice payment completed: ${payment.amountStr} USDC → ${payment.vendorName || payment.beneficiary}`, {
+                    const invPayToken = payment.token ?? "USDC";
+                    bot.editMessageText(`✅ Invoice payment completed: ${payment.amountStr} ${invPayToken} → ${payment.vendorName || payment.beneficiary}`, {
                         chat_id: source.originChatId,
                         message_id: source.originMessageId
                     }).catch(() => { });
@@ -250,7 +254,9 @@ export async function main() {
                 invoiceEngine.restoreSessionAfterPaymentInterruption(chatId, source.invoiceSessionId);
             }
         },
-        onEngineMessage
+        onEngineMessage,
+        eurc,
+        eurcAddress
     );
 
     // Fix scheduler with payment engine reference
@@ -266,6 +272,7 @@ export async function main() {
         invoiceEngine,
         conversationMemory,
         usdc,
+        eurc,
         agentIdentityEngine,
         pendingPaymentStore
     });

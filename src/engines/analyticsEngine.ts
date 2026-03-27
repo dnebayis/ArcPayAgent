@@ -176,7 +176,8 @@ export class AnalyticsEngine {
             const date = new Date(p.timestamp);
             const dateStr = `${date.getMonth() + 1}/${date.getDate()}`;
             const target = p.vendor ? escapeTelegramMarkdown(p.vendor) : `${p.address.slice(0, 8)}...`;
-            msg += `• ${dateStr} — **${formatUsdcAmount(p.amount)} USDC** → ${target}\n`;
+            const pToken = p.token ?? "USDC";
+            msg += `• ${dateStr} — **${formatUsdcAmount(p.amount)} ${pToken}** → ${target}\n`;
         }
 
         msg += `\nTip: use \`account summary\` for a broader account view.`;

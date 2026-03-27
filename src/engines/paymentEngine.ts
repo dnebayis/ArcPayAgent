@@ -20,6 +20,7 @@ export interface PendingPayment {
     memo: string | null;
     onConfirmed?: () => void;
     source?: PendingPaymentSource;
+    token?: "USDC" | "EURC";
 }
 
 type ExecutionState = "prepared" | "submitted" | "confirmed" | "failed";
@@ -43,7 +44,9 @@ export class PaymentEngine {
         private submittedTransactionStore?: SubmittedTransactionStore,
         private postConfirmHandler?: (chatId: number, payment: PendingPayment) => void,
         private postClearHandler?: (chatId: number, payment: PendingPayment, reason: PendingPaymentClearReason) => void,
-        private onMessage?: (chatId: number, msg: string) => void
+        private onMessage?: (chatId: number, msg: string) => void,
+        private eurc?: USDC,
+        private eurcAddress?: string
     ) { }
 
     private notify(chatId: number, msg: string): void {
@@ -64,7 +67,8 @@ export class PaymentEngine {
             amountStr: payment.amountStr,
             amount: payment.amount.toString(),
             memo: payment.memo,
-            source: payment.source
+            source: payment.source,
+            token: payment.token
         });
     }
 
@@ -80,7 +84,8 @@ export class PaymentEngine {
             amountStr: restored.amountStr,
             amount: BigInt(restored.amount),
             memo: restored.memo,
-            source: restored.source
+            source: restored.source,
+            token: restored.token
         };
 
         this.pendingPay[chatId.toString()] = payment;
@@ -107,7 +112,8 @@ export class PaymentEngine {
             amount: payment.amount.toString(),
             memo: payment.memo,
             source: payment.source,
-            submittedAt: Date.now()
+            submittedAt: Date.now(),
+            token: payment.token
         };
     }
 
@@ -142,7 +148,8 @@ export class PaymentEngine {
             amountStr: record.amountStr,
             amount: BigInt(record.amount),
             memo: record.memo,
-            source: record.source
+            source: record.source,
+            token: record.token
         };
     }
 
@@ -247,6 +254,7 @@ export class PaymentEngine {
             this.paymentLogs.logPayment(chatId, {
                 vendor: payment.vendorName,
                 address: payment.beneficiary,
+                token: payment.token,
                 amount: parseFloat(payment.amountStr),
                 timestamp: Date.now(),
                 memo: payment.memo || "",
@@ -283,9 +291,10 @@ export class PaymentEngine {
                 return "submitted";
             }
 
+            const payToken = payment.token ?? "USDC";
             this.sendAndNotify(
                 chatId,
-                `⏳ **Payment submitted**\n\nAmount: ${payment.amountStr} USDC\nRecipient: \`${payment.beneficiary}\`\nCircle TxID: \`${txId}\`\n\nCircle is processing the transaction. I’ll update you when it reaches a final status.`,
+                `⏳ **Payment submitted**\n\nAmount: ${payment.amountStr} ${payToken}\nRecipient: \`${payment.beneficiary}\`\nCircle TxID: \`${txId}\`\n\nCircle is processing the transaction. I’ll update you when it reaches a final status.`,
                 { parse_mode: "Markdown" }
             );
             this.clearPendingPayment(chatId, "submitted");
@@ -298,12 +307,13 @@ export class PaymentEngine {
                 return "confirmed";
             }
 
+            const payToken2 = payment.token ?? "USDC";
             const arcscanLink = finalStatus.txHash
                 ? `\n[View on ArcScan](https://testnet.arcscan.app/tx/${finalStatus.txHash})`
                 : "";
             this.sendAndNotify(
                 chatId,
-                `✅ **Payment confirmed**\n\nAmount: ${payment.amountStr} USDC\nRecipient: \`${payment.beneficiary}\`\nCircle TxID: \`${txId}\`${arcscanLink}`,
+                `✅ **Payment confirmed**\n\nAmount: ${payment.amountStr} ${payToken2}\nRecipient: \`${payment.beneficiary}\`\nCircle TxID: \`${txId}\`${arcscanLink}`,
                 { parse_mode: "Markdown" }
             );
             this.finalizePayment(chatId, payment, finalStatus.txHash || txId);
@@ -323,10 +333,11 @@ export class PaymentEngine {
             return "failed";
         }
 
+        const payToken3 = payment.token ?? "USDC";
         this.clearSubmittedTransaction(chatId);
         this.sendAndNotify(
             chatId,
-            `❌ **Payment failed**\n\nAmount: ${payment.amountStr} USDC\nRecipient: \`${payment.beneficiary}\`\nCircle TxID: \`${txId}\`\nReason: ${this.describeFailure(finalStatus)}`,
+            `❌ **Payment failed**\n\nAmount: ${payment.amountStr} ${payToken3}\nRecipient: \`${payment.beneficiary}\`\nCircle TxID: \`${txId}\`\nReason: ${this.describeFailure(finalStatus)}`,
             { parse_mode: "Markdown" }
         );
         this.clearPendingPayment(chatId, "failed");
@@ -357,13 +368,14 @@ export class PaymentEngine {
             return;
         }
 
+        const recToken = payment.token ?? "USDC";
         if (this.circleClient.isSuccessfulTerminalState(tx.state)) {
             const arcscanLink = tx.txHash
                 ? `\n[View on ArcScan](https://testnet.arcscan.app/tx/${tx.txHash})`
                 : "";
             this.sendAndNotify(
                 ensuredRecord.chatId,
-                `✅ **Payment confirmed**\n\nAmount: ${payment.amountStr} USDC\nRecipient: \`${payment.beneficiary}\`\nCircle TxID: \`${ensuredRecord.txId}\`${arcscanLink}`,
+                `✅ **Payment confirmed**\n\nAmount: ${payment.amountStr} ${recToken}\nRecipient: \`${payment.beneficiary}\`\nCircle TxID: \`${ensuredRecord.txId}\`${arcscanLink}`,
                 { parse_mode: "Markdown" }
             );
             this.finalizePayment(ensuredRecord.chatId, payment, tx.txHash || ensuredRecord.txId!);
@@ -374,7 +386,7 @@ export class PaymentEngine {
 
         this.sendAndNotify(
             ensuredRecord.chatId,
-            `❌ **Payment failed**\n\nAmount: ${payment.amountStr} USDC\nRecipient: \`${payment.beneficiary}\`\nCircle TxID: \`${ensuredRecord.txId}\`\nReason: ${this.describeFailure(tx)}`,
+            `❌ **Payment failed**\n\nAmount: ${payment.amountStr} ${recToken}\nRecipient: \`${payment.beneficiary}\`\nCircle TxID: \`${ensuredRecord.txId}\`\nReason: ${this.describeFailure(tx)}`,
             { parse_mode: "Markdown" }
         );
     }
@@ -390,9 +402,10 @@ export class PaymentEngine {
             if (age < PaymentEngine.PENDING_EXPIRY_MS) continue;
             this.clearPendingPayment(chatId, "expired");
             const recipient = payment.vendorName || payment.beneficiary;
+            const expToken = payment.token ?? "USDC";
             this.sendAndNotify(
                 chatId,
-                `⏰ The pending payment of ${payment.amountStr} USDC to ${recipient} has expired after 30 minutes. Start a new payment when you're ready.`
+                `⏰ The pending payment of ${payment.amountStr} ${expToken} to ${recipient} has expired after 30 minutes. Start a new payment when you're ready.`
             ).catch(() => { });
         }
     }
@@ -420,7 +433,7 @@ export class PaymentEngine {
         beneficiary: string,
         amountStr: string,
         memo: string | null = "ArcPay",
-        options?: { onConfirmed?: () => void; source?: PendingPaymentSource; vendorNameOverride?: string | null; origin?: "no_key" | "byok" }
+        options?: { onConfirmed?: () => void; source?: PendingPaymentSource; vendorNameOverride?: string | null; origin?: "no_key" | "byok"; token?: "USDC" | "EURC" }
     ) {
         if (!amountStr || isNaN(parseFloat(amountStr)) || parseFloat(amountStr) <= 0) {
             this.sendAndNotify(chatId, "Please enter a valid amount. Example: `send 5 usdc to jack`", { parse_mode: "Markdown" });
@@ -470,6 +483,7 @@ export class PaymentEngine {
 
         const amount = ethers.parseUnits(amountStr, 6);
 
+        const token = options?.token ?? "USDC";
         this.pendingPay[chatId.toString()] = {
             beneficiary: resolvedBeneficiary,
             vendorName,
@@ -477,12 +491,16 @@ export class PaymentEngine {
             amount,
             memo,
             onConfirmed: options?.onConfirmed,
-            source: options?.source
+            source: options?.source,
+            token
         };
         this.persistPendingPayment(chatId, this.pendingPay[chatId.toString()]);
 
         const displayRecipient = vendorName || inputName;
-        const message = `Review payment\n\nAmount: **${amountStr} USDC**\nRecipient: **${escapeTelegramMarkdown(displayRecipient)}**\nDestination: \`${resolvedBeneficiary}\`${memo ? `\nMemo: ${escapeTelegramMarkdown(memo)}` : ""}\n\nWhat happens next:\n• I’ll check your balance\n• I’ll check whether approval is needed\n• I’ll submit the payment through Circle after you confirm`;
+        const nextStepsMsg = token === "EURC"
+            ? `What happens next:\n• I’ll check your EURC balance\n• I’ll submit the transfer directly through Circle after you confirm`
+            : `What happens next:\n• I’ll check your balance\n• I’ll check whether approval is needed\n• I’ll submit the payment through Circle after you confirm`;
+        const message = `Review payment\n\nAmount: **${amountStr} ${token}**\nRecipient: **${escapeTelegramMarkdown(displayRecipient)}**\nDestination: \`${resolvedBeneficiary}\`${memo ? `\nMemo: ${escapeTelegramMarkdown(memo)}` : ""}\n\n${nextStepsMsg}`;
 
         const inlineKeyboard = [
             [
@@ -556,8 +574,39 @@ export class PaymentEngine {
                 return;
             }
 
-            const balance = await this.usdc.balanceOf(walletAddress);
+            const payToken = payment.token ?? "USDC";
             const gasReserve = getArcGasReserveUsdc();
+
+            if (payToken === "EURC") {
+                // For EURC: check EURC balance for payment amount, check USDC balance for gas
+                const eurcBalance = this.eurc ? await this.eurc.balanceOf(walletAddress) : 0n;
+                const usdcBalanceForGas = await this.usdc.balanceOf(walletAddress);
+
+                if (eurcBalance < payment.amount) {
+                    this.sendAndNotify(
+                        chatId,
+                        `❌ **Insufficient EURC balance**\n\nPayment: ${payment.amountStr} EURC\nAvailable: ${ethers.formatUnits(eurcBalance, 6)} EURC`,
+                        { parse_mode: "Markdown" }
+                    );
+                    this.clearPendingPayment(chatId, "failed");
+                    return;
+                }
+
+                if (usdcBalanceForGas < gasReserve) {
+                    this.sendAndNotify(
+                        chatId,
+                        `❌ **Insufficient USDC for gas**\n\nArc gas reserve required: ${ethers.formatUnits(gasReserve, 6)} USDC\nAvailable: ${ethers.formatUnits(usdcBalanceForGas, 6)} USDC\n\nArc uses USDC for gas even for EURC payments.`,
+                        { parse_mode: "Markdown" }
+                    );
+                    this.clearPendingPayment(chatId, "failed");
+                    return;
+                }
+
+                await this.executeDirectTransfer(chatId, walletId, payment);
+                return;
+            }
+
+            const balance = await this.usdc.balanceOf(walletAddress);
             const totalRequired = payment.amount + gasReserve;
 
             if (balance < totalRequired) {
@@ -593,7 +642,7 @@ export class PaymentEngine {
         } catch (error: any) {
             const errMsg = error.message || "";
             const userMsg = errMsg.includes("transfer_failed") || errMsg.includes("insufficient funds")
-                ? "❌ USDC transfer failed due to balance or gas limit rules."
+                ? "❌ Transfer failed due to balance or gas limit rules."
                 : `❌ Circle transaction failed: ${errMsg.substring(0, 200)}`;
             this.sendAndNotify(chatId, userMsg);
             this.clearPendingPayment(chatId, "failed");
@@ -655,7 +704,11 @@ export class PaymentEngine {
         this.persistPendingPayment(chatId, payment);
 
         const displayRecipient = payment.vendorName || payment.beneficiary;
-        const message = `Payment updated\n\nAmount: **${payment.amountStr} USDC**\nRecipient: **${escapeTelegramMarkdown(displayRecipient)}**\nDestination: \`${payment.beneficiary}\`${updatedMemo ? `\nMemo: ${escapeTelegramMarkdown(updatedMemo)}` : ""}\n\nWhat happens next:\n• I’ll check your balance\n• I’ll check whether approval is needed\n• I’ll submit the payment through Circle after you confirm`;
+        const updPayToken = payment.token ?? "USDC";
+        const updNextSteps = updPayToken === "EURC"
+            ? `What happens next:\n• I’ll check your EURC balance\n• I’ll submit the transfer directly through Circle after you confirm`
+            : `What happens next:\n• I’ll check your balance\n• I’ll check whether approval is needed\n• I’ll submit the payment through Circle after you confirm`;
+        const message = `Payment updated\n\nAmount: **${payment.amountStr} ${updPayToken}**\nRecipient: **${escapeTelegramMarkdown(displayRecipient)}**\nDestination: \`${payment.beneficiary}\`${updatedMemo ? `\nMemo: ${escapeTelegramMarkdown(updatedMemo)}` : ""}\n\n${updNextSteps}`;
 
         const inlineKeyboard = [
             [
@@ -739,8 +792,38 @@ export class PaymentEngine {
                     return;
                 }
 
-                const balance = await this.usdc.balanceOf(walletAddress);
+                const cbPayToken = payment.token ?? "USDC";
                 const gasReserve = getArcGasReserveUsdc();
+
+                if (cbPayToken === "EURC") {
+                    const eurcBalance = this.eurc ? await this.eurc.balanceOf(walletAddress) : 0n;
+                    const usdcForGas = await this.usdc.balanceOf(walletAddress);
+
+                    if (eurcBalance < payment.amount) {
+                        this.bot.editMessageText(`❌ **Insufficient EURC balance**\n\nPayment: ${payment.amountStr} EURC\nAvailable: ${ethers.formatUnits(eurcBalance, 6)} EURC`, {
+                            chat_id: query.message.chat.id,
+                            message_id: query.message.message_id,
+                            parse_mode: "Markdown"
+                        });
+                        this.clearPendingPayment(chatId, "failed");
+                        return;
+                    }
+
+                    if (usdcForGas < gasReserve) {
+                        this.bot.editMessageText(`❌ **Insufficient USDC for gas**\n\nRequired: ${ethers.formatUnits(gasReserve, 6)} USDC\nAvailable: ${ethers.formatUnits(usdcForGas, 6)} USDC`, {
+                            chat_id: query.message.chat.id,
+                            message_id: query.message.message_id,
+                            parse_mode: "Markdown"
+                        });
+                        this.clearPendingPayment(chatId, "failed");
+                        return;
+                    }
+
+                    await this.executeDirectTransfer(chatId, walletId, payment, query.message.message_id);
+                    return;
+                }
+
+                const balance = await this.usdc.balanceOf(walletAddress);
                 const totalRequired = payment.amount + gasReserve;
 
                 if (balance < totalRequired) {
@@ -799,7 +882,7 @@ export class PaymentEngine {
             const errMsg = error.message || "";
 
             if (errMsg.includes("transfer_failed") || errMsg.includes("insufficient funds")) {
-                userMsg = "❌ USDC transfer failed due to balance or gas limit rules.";
+                userMsg = "❌ Transfer failed due to balance or gas limit rules.";
             } else {
                 userMsg = `❌ Circle transaction failed: ${errMsg.substring(0, 200)}`;
             }
@@ -825,6 +908,26 @@ export class PaymentEngine {
         this.markSubmittedTransaction(record, txId);
         this.clearPendingPayment(chatId, "submitted");
         this.sendAndNotify(chatId, `⏳ **Payment submitted**\n\nAmount: ${payment.amountStr} USDC\nRecipient: \`${payment.beneficiary}\`\nCircle TxID: \`${txId}\`\n\nCircle is processing the transaction. I’ll update you when it reaches a final status.`, {
+            parse_mode: "Markdown"
+        });
+        await this.resolveSubmittedTransaction(chatId, payment, txId, "payment");
+    }
+
+    private async executeDirectTransfer(chatId: number, walletId: string, payment: PendingPayment, messageId?: number) {
+        if (messageId) {
+            this.bot.editMessageText("Processing EURC transfer securely on Circle...", {
+                chat_id: chatId,
+                message_id: messageId
+            });
+        }
+
+        const eurcContractAddress = this.eurcAddress || (this.eurc ? this.eurc.getAddress() : "");
+        const encodedTransfer = this.eurc!.encodeTransfer(payment.beneficiary, payment.amount);
+        const record = this.createSubmissionAttempt(chatId, walletId, payment, "payment");
+        const txId = await this.circleClient.createTransaction(walletId, eurcContractAddress, encodedTransfer, record.idempotencyKey);
+        this.markSubmittedTransaction(record, txId);
+        this.clearPendingPayment(chatId, "submitted");
+        this.sendAndNotify(chatId, `⏳ **EURC transfer submitted**\n\nAmount: ${payment.amountStr} EURC\nRecipient: \`${payment.beneficiary}\`\nCircle TxID: \`${txId}\`\n\nCircle is processing the transaction. I’ll update you when it reaches a final status.`, {
             parse_mode: "Markdown"
         });
         await this.resolveSubmittedTransaction(chatId, payment, txId, "payment");
