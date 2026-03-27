@@ -352,6 +352,16 @@ export class InvoiceEngine {
         return session;
     }
 
+    /** Send the invoice summary card directly to the user (bypasses LLM). */
+    sendInvoiceSummary(chatId: number, session: InvoiceSessionRecord): void {
+        const message = this.buildSessionSummaryMessage(session);
+        this.bot.sendMessage(chatId, message, {
+            parse_mode: "Markdown",
+            ...(this.getInvoiceReplyMarkup(session) ? { reply_markup: this.getInvoiceReplyMarkup(session) } : {})
+        });
+        this.onMessage?.(chatId, message);
+    }
+
     private getInvoiceReplyMarkup(session: InvoiceSessionRecord): TelegramBot.SendMessageOptions["reply_markup"] | undefined {
         if (session.status !== "ready_to_prepare" || !session.resolution.canPreparePayment) {
             return undefined;
@@ -735,10 +745,9 @@ export class InvoiceEngine {
      */
     async extractTextFromPDF(buffer: Buffer): Promise<string> {
         try {
-            const { PDFParse } = await import("pdf-parse");
-            const parser = new PDFParse({ data: buffer });
-            const result = await parser.getText();
-            const text = (result as any).text || "";
+            const pdfParse = ((await import("pdf-parse")) as any).default ?? (await import("pdf-parse"));
+            const result = await pdfParse(buffer);
+            const text = result.text || "";
             console.log(`[Invoice] PDF text extracted: ${text.length} chars`);
 
             // If we got meaningful text, use it

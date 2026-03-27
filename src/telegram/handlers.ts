@@ -220,9 +220,16 @@ Follow us: @ArcPayAgent`;
                         sourceMessageId: msg.message_id,
                         sourceMimeType: "application/pdf"
                     });
+                    if (result.session === null) {
+                        bot.sendMessage(chatId, "❌ I couldn't extract invoice details from this document. Make sure it's a text-based PDF (not scanned), or try sending a clearer photo.");
+                        return;
+                    }
+                    invoiceEngine.sendInvoiceSummary(chatId, result.session);
                     const caption = msg.caption?.trim();
-                    const orchestratorMsg = buildInvoiceOrchestratorMessage(result, caption);
-                    await handleTextTurn(chatId, orchestratorMsg);
+                    if (caption) {
+                        const orchestratorMsg = buildInvoiceOrchestratorMessage(result, caption);
+                        await handleTextTurn(chatId, orchestratorMsg);
+                    }
                 } catch (err: any) {
                     bot.sendMessage(chatId, `❌ Failed to process PDF: ${err.message}`);
                 }
@@ -243,9 +250,16 @@ Follow us: @ArcPayAgent`;
                     sourceMessageId: msg.message_id,
                     sourceMimeType: "image/png"
                 });
+                if (result.session === null) {
+                    bot.sendMessage(chatId, "❌ I couldn't extract invoice details from this image. Try sending a clearer photo or a text-based PDF.");
+                    return;
+                }
+                invoiceEngine.sendInvoiceSummary(chatId, result.session);
                 const caption = msg.caption?.trim();
-                const orchestratorMsg = buildInvoiceOrchestratorMessage(result, caption);
-                await handleTextTurn(chatId, orchestratorMsg);
+                if (caption) {
+                    const orchestratorMsg = buildInvoiceOrchestratorMessage(result, caption);
+                    await handleTextTurn(chatId, orchestratorMsg);
+                }
             } catch (err: any) {
                 bot.sendMessage(chatId, `❌ Failed to process image: ${err.message}`);
             }
