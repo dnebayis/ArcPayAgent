@@ -78,18 +78,35 @@ export class AnalyticsEngine {
     /**
      * Monthly spending breakdown
      */
-    getMonthlySpending(chatId: number): { month: string; total: number }[] {
+    getMonthlySpending(chatId: number): { month: string; total: number; count: number; topVendor: string | null; vendors: { vendor: string; total: number; count: number }[] }[] {
         const payments = this.paymentLogs.getPayments(chatId);
-        const map: Record<string, number> = {};
+        const map: Record<string, { total: number; count: number; vendors: Record<string, { total: number; count: number }> }> = {};
 
         for (const p of payments) {
             const d = new Date(p.timestamp);
             const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-            map[key] = (map[key] || 0) + p.amount;
+            if (!map[key]) map[key] = { total: 0, count: 0, vendors: {} };
+            map[key].total += p.amount;
+            map[key].count += 1;
+            const vKey = p.vendor || p.address.slice(0, 10);
+            if (!map[key].vendors[vKey]) map[key].vendors[vKey] = { total: 0, count: 0 };
+            map[key].vendors[vKey].total += p.amount;
+            map[key].vendors[vKey].count += 1;
         }
 
         return Object.entries(map)
-            .map(([month, total]) => ({ month, total }))
+            .map(([month, data]) => {
+                const vendors = Object.entries(data.vendors)
+                    .map(([vendor, v]) => ({ vendor, total: v.total, count: v.count }))
+                    .sort((a, b) => b.total - a.total);
+                return {
+                    month,
+                    total: data.total,
+                    count: data.count,
+                    topVendor: vendors[0]?.vendor ?? null,
+                    vendors
+                };
+            })
             .sort((a, b) => a.month.localeCompare(b.month));
     }
 
@@ -196,13 +213,21 @@ export class AnalyticsEngine {
             return;
         }
 
-        let msg = "📅 **Monthly Spending**\n\n";
-        const grandTotal = monthly.reduce((sum, month) => sum + month.total, 0);
-        msg += `💰 **Lifetime spend tracked:** ${formatUsdcAmount(grandTotal)} USDC\n`;
-        msg += `🗓️ **Months with activity:** ${monthly.length}\n\n`;
+        const grandTotal = monthly.reduce((sum, m) => sum + m.total, 0);
+        const grandCount = monthly.reduce((sum, m) => sum + m.count, 0);
 
-        for (const m of monthly) {
-            msg += `• **${m.month}** → ${formatUsdcAmount(m.total)} USDC\n`;
+        let msg = "📅 **Monthly Spending**\n\n";
+        msg += `💰 **Lifetime:** ${formatUsdcAmount(grandTotal)} USDC across ${grandCount} payment${grandCount === 1 ? "" : "s"}\n`;
+        msg += `🗓️ **Active months:** ${monthly.length}\n\n`;
+
+        // Most recent month first
+        for (const m of [...monthly].reverse()) {
+            msg += `**${m.month}** — ${formatUsdcAmount(m.total)} USDC · ${m.count} payment${m.count === 1 ? "" : "s"}\n`;
+            for (const v of m.vendors) {
+                const pct = ((v.total / m.total) * 100).toFixed(0);
+                msg += `  • ${escapeTelegramMarkdown(v.vendor)}: ${formatUsdcAmount(v.total)} USDC (${v.count}x, ${pct}%)\n`;
+            }
+            msg += "\n";
         }
 
         await this.send(chatId, msg, { parse_mode: "Markdown" });
