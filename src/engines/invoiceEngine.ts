@@ -741,33 +741,31 @@ export class InvoiceEngine {
     }
 
     /**
-     * Step 2a — Extract text from PDF using pdf-parse, with OCR fallback
+     * Step 2a — Extract text from PDF using pdf-parse.
+     * OCR fallback is intentionally skipped for PDFs: tesseract.js cannot
+     * process PDF buffers and throws an uncaught Worker error that kills the process.
      */
     async extractTextFromPDF(buffer: Buffer): Promise<string> {
         try {
-            const pdfParse = ((await import("pdf-parse")) as any).default ?? (await import("pdf-parse"));
+            // eslint-disable-next-line @typescript-eslint/no-require-imports
+            const pdfParse = require("pdf-parse") as (buf: Buffer) => Promise<{ text: string }>;
             const result = await pdfParse(buffer);
             const text = result.text || "";
             console.log(`[Invoice] PDF text extracted: ${text.length} chars`);
 
-            // If we got meaningful text, use it
             if (text.trim().length > 20) {
                 console.log(`[Invoice] PDF text preview: ${text.substring(0, 200)}`);
                 return text;
             }
 
-            // PDF might be scanned/image-based — fall back to OCR
-            console.log("[Invoice] PDF text too short, falling back to OCR...");
+            console.log("[Invoice] PDF text too short — likely a scanned PDF.");
         } catch (err: any) {
-            console.log(`[Invoice] PDF parse failed: ${err.message}, falling back to OCR...`);
+            console.log(`[Invoice] PDF parse failed: ${err.message}`);
         }
 
-        // Fallback: try OCR on the raw buffer (works for some image-embedded PDFs)
-        try {
-            return await this.extractTextFromImage(buffer);
-        } catch {
-            return "";
-        }
+        // Scanned/image PDFs cannot be OCR'd directly from the PDF buffer.
+        // Return empty string — processInvoiceSilent handles the missing-data case.
+        return "";
     }
 
     /**
