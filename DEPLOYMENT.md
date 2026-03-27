@@ -137,6 +137,19 @@ Use this if:
 - you want persistence across redeploys without disk coupling
 - you want cleaner operational durability
 
+The app automatically uses SSL for any non-localhost connection string (required by Northflank and most cloud providers).
+
+#### Northflank PostgreSQL Setup
+
+1. In your Northflank project, go to **Addons → Add Addon → PostgreSQL**
+2. Create the addon (any name, e.g. `arcpay-db`)
+3. Once provisioned, open the addon and copy the **Connection string** from the **Connection details** tab
+4. In your Northflank service, go to **Environment → Add Variable**:
+   - Key: `DATABASE_URL`
+   - Value: the connection string from step 3
+5. Redeploy the service — on first boot the app creates the `stores` table automatically
+6. All existing data from SQLite is **not** auto-migrated; start fresh or manually import if needed
+
 ## Recommended Production Shape
 
 Best current shape:

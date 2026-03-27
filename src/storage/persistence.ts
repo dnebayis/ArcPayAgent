@@ -50,7 +50,11 @@ function getPostgresPool(): Pool {
             throw new Error("DATABASE_URL is not defined");
         }
 
-        postgresPool = new Pool({ connectionString });
+        const isLocal = /localhost|127\.0\.0\.1/.test(connectionString);
+        postgresPool = new Pool({
+            connectionString,
+            ssl: isLocal ? false : { rejectUnauthorized: false }
+        });
     }
 
     return postgresPool;

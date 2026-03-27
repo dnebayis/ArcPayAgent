@@ -165,7 +165,4 @@ export class Orchestrator {
         this.memory.addBotMessage(chatId, resultMsg);
     }
 
-    reset(chatId: number): void {
-        this.memory.clearContext(chatId);
-    }
 }

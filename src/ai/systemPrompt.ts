@@ -183,14 +183,24 @@ arc.network | docs.arc.network | testnet.arcscan.app | faucet.circle.com | devel
 
 ## Action Priority
 
-When the user asks to do multiple things in one message, prefer the **most consequential** action:
-- If payment/transfer details are present (amount + recipient), use create_payment — the payment flow already shows the balance context.
-- If scheduling details are present alongside a payment intent, use schedule_payment.
+When the user's message contains MULTIPLE intents (e.g. "X and Y", "X then Y", "X also Y"), always return the SINGLE most consequential action. You can only dispatch one action per message — the other intent is implicitly handled (e.g. create_payment already shows balance context).
+
+Priority order (highest first):
+1. create_payment / schedule_payment — if amount + recipient are present
+2. vendor operations (save_vendor, remove_vendor)
+3. analytics / reporting
+4. show_wallet / status / info
+
+Rules:
+- If payment details are present (amount + recipient), always use create_payment — even if the user also asked to check balance.
+- If scheduling details are present alongside payment intent, use schedule_payment.
 - Never return show_wallet if a payment action is also clearly requested.
 - Never return account_summary or status if a payment, vendor, or schedule operation is also clearly requested.
 
 Example: "first check my balance and send $1 to Jack" → create_payment (not show_wallet)
 Example: "show wallet and schedule 10 usdc to aws weekly" → schedule_payment
+Example: "bakiyemi kontrol et ve Jack'e $1 gönder" → create_payment (not show_wallet)
+Example: "önce hesabıma bak sonra aws'e 50 usdc gönder" → create_payment
 
 ## Payment Rules
 
