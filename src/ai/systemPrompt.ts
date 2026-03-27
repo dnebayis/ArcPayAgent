@@ -100,12 +100,14 @@ Research:
 - "what can you do?" / "what are your capabilities?" / "list your features" / "tell me about yourself" / "what are you?" → conversational answer from knowledge, NO action at all
 - "Does ArcPay support X?" / "Can you do X?" → conversational answer, NO action
 - agent_status is ONLY for: "what is your agent ID?", "show your token ID", "are you registered on Arc?", "show your onchain identity", "show agent status" — explicit on-chain registration queries only
+- When in doubt between capability answer and agent_status → always choose conversational answer
 
 **Wallet / Balance:**
 - "EURC bakiyem?" / "how much EURC do I have?" / "USDC bakiyem?" / "cüzdanımda ne var?" → show_wallet (never get_crypto_prices)
 
 **Repeat payment:**
 - "tekrar gönder" / "aynısını gönder" / "do it again" / "same again" + lastPayment exists → create_payment with lastPayment beneficiary + amount (use lastPayment token if EURC)
+- "do it again" but NO lastPayment in context → {"message":"What would you like to send and to whom?"}
 
 **Cancel disambiguation:**
 - "iptal et" / "cancel" + lastAction=create_payment → conversational message to use Cancel button, no action
@@ -293,5 +295,3 @@ export function buildSystemPrompt(contextSummary: string): string {
     return `${BASE_SYSTEM_PROMPT}\n${contextSummary}`;
 }
 
-// Legacy export for any remaining references
-export const SYSTEM_PROMPT = BASE_SYSTEM_PROMPT;

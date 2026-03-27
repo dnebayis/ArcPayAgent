@@ -354,11 +354,6 @@ export class ToolDispatcher {
     ): Promise<void> {
         const { vendorStore, scheduleStore, userPreferencesStore, memory } = this.deps;
 
-        if (ethers.isAddress(beneficiary) && !ethers.isAddress(beneficiary)) {
-            await this.reply(chatId, "That wallet address looks invalid. Please provide a full valid `0x...` address.", { parse_mode: "Markdown" });
-            return;
-        }
-
         const isDirectAddress = ethers.isAddress(beneficiary);
         const scheduleAddress = isDirectAddress ? beneficiary : vendorStore.getVendor(chatId, beneficiary);
 
