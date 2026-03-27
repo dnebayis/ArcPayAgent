@@ -255,12 +255,12 @@ describe("AnalyticsEngine", () => {
         );
         expect(mockBot.sendMessage).toHaveBeenCalledWith(
             1,
-            expect.stringContaining("**Lifetime spend tracked:** 80 USDC"),
+            expect.stringContaining("**Lifetime:** 80 USDC across 2 payments"),
             expect.any(Object)
         );
         expect(mockBot.sendMessage).toHaveBeenCalledWith(
             1,
-            expect.stringContaining("**Months with activity:** 2"),
+            expect.stringContaining("**Active months:** 2"),
             expect.any(Object)
         );
     });

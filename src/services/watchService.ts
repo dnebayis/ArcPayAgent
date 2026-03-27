@@ -6,8 +6,12 @@ import { USDC } from "../blockchain/usdc";
  * Polls USDC and EURC balances for users who have enabled incoming payment
  * notifications. Sends a Telegram message when the balance increases.
  */
+const CONSECUTIVE_FAILURE_WARN_THRESHOLD = 5; // ~2.5 minutes of failures before warning
+
 export class WatchService {
     private timer: ReturnType<typeof setInterval> | null = null;
+    /** Tracks consecutive RPC failures per chatId to surface persistent issues early */
+    private consecutiveFailures = new Map<number, number>();
 
     constructor(
         private bot: TelegramBot,
@@ -36,8 +40,14 @@ export class WatchService {
         for (const settings of enabled) {
             try {
                 await this.checkIncoming(settings);
+                this.consecutiveFailures.delete(settings.chatId); // reset on success
             } catch (error: any) {
-                console.error(`[WatchService] Error checking chatId=${settings.chatId}:`, error.message);
+                const count = (this.consecutiveFailures.get(settings.chatId) ?? 0) + 1;
+                this.consecutiveFailures.set(settings.chatId, count);
+                console.error(`[WatchService] Error checking chatId=${settings.chatId} (failure #${count}):`, error.message);
+                if (count === CONSECUTIVE_FAILURE_WARN_THRESHOLD) {
+                    console.warn(`[WatchService] chatId=${settings.chatId} has failed ${count} consecutive checks — possible RPC or wallet issue`);
+                }
             }
         }
     }

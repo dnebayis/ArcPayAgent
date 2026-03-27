@@ -120,6 +120,7 @@ describe("Telegram handlers callback flows", () => {
         expect(prepareArgs[1]).toBe("aws");
         expect(prepareArgs[2]).toBe("10");
         expect(prepareArgs[4]).toEqual({
+            token: "USDC",
             source: {
                 type: "schedule",
                 scheduleId: "sched-1",
@@ -252,6 +253,7 @@ describe("Telegram handlers message flow", () => {
 
         invoiceEngine = {
             clearPendingInvoice: vi.fn(),
+            sendInvoiceSummary: vi.fn(),
             analyzeInvoice: vi.fn().mockResolvedValue({
                 vendor: "AWS",
                 amount: "10",
@@ -306,20 +308,14 @@ describe("Telegram handlers message flow", () => {
         expect(bot.sendMessage).not.toHaveBeenCalled();
     });
 
-    it("should clear chat context and local memory on /reset", async () => {
+    it("should forward unrecognized slash commands to orchestrator", async () => {
         await listeners.message({
             chat: { id: 1 },
             text: "/reset"
         });
 
-        expect(bot.sendMessage).toHaveBeenCalledWith(
-            1,
-            "Cleared this chat's conversation context, pending follow-ups, and local memory. Your wallet, saved vendors, schedules, payment history, invoices, and LLM key were kept."
-        );
-        expect(orchestrator.handleMessage).not.toHaveBeenCalled();
-        expect(conversationMemory.clearContext).toHaveBeenCalledWith(1);
-        expect(invoiceEngine.clearPendingInvoice).toHaveBeenCalledWith(1);
-        expect(paymentEngine.resetPendingPayment).toHaveBeenCalledWith(1);
+        // /reset is not a built-in command — it's forwarded to the orchestrator
+        expect(orchestrator.handleMessage).toHaveBeenCalledWith(1, "/reset");
     });
 
     it("should route text messages to orchestrator", async () => {
@@ -353,7 +349,7 @@ describe("Telegram handlers message flow", () => {
         expect(orchestrator.handleMessage.mock.calls[0][1]).toContain("is this invoice safe?");
     });
 
-    it("should analyze a PDF invoice silently and call orchestrator even without caption", async () => {
+    it("should analyze a PDF invoice silently and show summary without caption", async () => {
         await listeners.message({
             chat: { id: 1 },
             document: {
@@ -365,8 +361,9 @@ describe("Telegram handlers message flow", () => {
         expect(bot.sendMessage).toHaveBeenCalledWith(1, "📄 Analyzing invoice...");
         expect(invoiceEngine.analyzeInvoice).toHaveBeenCalledTimes(1);
         expect(invoiceEngine.processInvoiceSilent).toHaveBeenCalledTimes(1);
-        // Orchestrator is still called with a synthetic prompt
-        expect(orchestrator.handleMessage).toHaveBeenCalledTimes(1);
+        expect(invoiceEngine.sendInvoiceSummary).toHaveBeenCalledTimes(1);
+        // No caption → orchestrator is NOT called
+        expect(orchestrator.handleMessage).not.toHaveBeenCalled();
     });
 
     it("should analyze a photo invoice silently and pass caption to orchestrator", async () => {

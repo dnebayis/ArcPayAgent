@@ -78,6 +78,28 @@ export class ResearchTools {
         }
     }
 
+    /**
+     * Retries a failing async operation with linear backoff.
+     * Only retries on network/timeout errors — 4xx responses are not retried.
+     */
+    private async withRetry<T>(fn: () => Promise<T>, maxAttempts = 2, baseDelayMs = 1000): Promise<T> {
+        let lastError: unknown;
+        for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+            try {
+                return await fn();
+            } catch (err: any) {
+                lastError = err;
+                const isClientError = /\b4\d{2}\b/.test(err?.message ?? ""); // 4xx — permanent, don't retry
+                if (attempt < maxAttempts && !isClientError) {
+                    await new Promise(r => setTimeout(r, baseDelayMs * attempt));
+                } else {
+                    break;
+                }
+            }
+        }
+        throw lastError;
+    }
+
     private async getCryptoPrices(symbols: string[]): Promise<ResearchData> {
         const coinIds = symbols
             .map(s => this.normalizeCoinId(s.toLowerCase()))
@@ -90,34 +112,33 @@ export class ResearchTools {
 
         const url = `https://api.coingecko.com/api/v3/simple/price?ids=${coinIds}&vs_currencies=usd&include_24hr_change=true`;
 
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 8000);
-
-        try {
-            const response = await fetch(url, { signal: controller.signal });
-            clearTimeout(timeout);
-
-            if (!response.ok) {
-                throw new Error(`CoinGecko API error: ${response.status}`);
+        const doFetch = async () => {
+            const controller = new AbortController();
+            const timeout = setTimeout(() => controller.abort(), 8000);
+            try {
+                const response = await fetch(url, { signal: controller.signal });
+                clearTimeout(timeout);
+                if (!response.ok) throw new Error(`CoinGecko API error: ${response.status}`);
+                return await response.json() as Record<string, { usd?: number; usd_24h_change?: number }>;
+            } catch (err) {
+                clearTimeout(timeout);
+                throw err;
             }
+        };
 
-            const data = await response.json() as Record<string, { usd?: number; usd_24h_change?: number }>;
+        const data = await this.withRetry(doFetch);
 
-            const prices: CryptoPriceData[] = symbols.map(symbol => {
-                const id = this.normalizeCoinId(symbol.toLowerCase());
-                const entry = id ? data[id] : null;
-                return {
-                    symbol: symbol.toUpperCase(),
-                    price_usd: entry?.usd ?? null,
-                    price_change_24h_pct: entry?.usd_24h_change ?? null
-                };
-            });
+        const prices: CryptoPriceData[] = symbols.map(symbol => {
+            const id = this.normalizeCoinId(symbol.toLowerCase());
+            const entry = id ? data[id] : null;
+            return {
+                symbol: symbol.toUpperCase(),
+                price_usd: entry?.usd ?? null,
+                price_change_24h_pct: entry?.usd_24h_change ?? null
+            };
+        });
 
-            return { type: "crypto_prices", prices };
-        } catch (error: any) {
-            clearTimeout(timeout);
-            throw error;
-        }
+        return { type: "crypto_prices", prices };
     }
 
     private async getArcNetworkStats(): Promise<ResearchData> {
@@ -179,32 +200,31 @@ export class ResearchTools {
     private async getFxRate(from: string, to: string, amount: number): Promise<ResearchData> {
         const url = `https://api.frankfurter.app/latest?from=${from}&to=${to}&amount=${amount}`;
 
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 8000);
-
-        try {
-            const response = await fetch(url, { signal: controller.signal });
-            clearTimeout(timeout);
-
-            if (!response.ok) {
-                throw new Error(`Frankfurter API error: ${response.status}`);
+        const doFetch = async () => {
+            const controller = new AbortController();
+            const timeout = setTimeout(() => controller.abort(), 8000);
+            try {
+                const response = await fetch(url, { signal: controller.signal });
+                clearTimeout(timeout);
+                if (!response.ok) throw new Error(`Frankfurter API error: ${response.status}`);
+                return await response.json() as { amount: number; base: string; date: string; rates: Record<string, number> };
+            } catch (err) {
+                clearTimeout(timeout);
+                throw err;
             }
+        };
 
-            const data = await response.json() as { amount: number; base: string; date: string; rates: Record<string, number> };
-            const result = data.rates[to];
+        const data = await this.withRetry(doFetch);
+        const result = data.rates[to];
 
-            if (result === undefined) {
-                throw new Error(`Currency ${to} not found in response`);
-            }
-
-            return {
-                type: "fx_rate",
-                fx: { from, to, amount, result, date: data.date }
-            };
-        } catch (error: any) {
-            clearTimeout(timeout);
-            throw error;
+        if (result === undefined) {
+            throw new Error(`Currency ${to} not found in FX response`);
         }
+
+        return {
+            type: "fx_rate",
+            fx: { from, to, amount, result, date: data.date }
+        };
     }
 
     private normalizeCoinId(input: string): string {

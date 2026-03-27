@@ -8,6 +8,8 @@ import { ResearchTools } from "../tools/researchTools";
  */
 export class AlertService {
     private timer: ReturnType<typeof setInterval> | null = null;
+    /** Pause further ticks until this timestamp (used for rate-limit backoff) */
+    private pauseUntil = 0;
 
     constructor(
         private bot: TelegramBot,
@@ -29,6 +31,8 @@ export class AlertService {
     }
 
     private async tick(): Promise<void> {
+        if (Date.now() < this.pauseUntil) return; // rate-limit backoff active
+
         const active = this.alertStore.getAllActive();
         if (!active.length) return;
 
@@ -70,6 +74,11 @@ export class AlertService {
             }
         } catch (error: any) {
             console.error("[AlertService] tick error:", error.message);
+            // Back off for 5 minutes on rate-limit (429) to avoid CoinGecko bans
+            if (/429/.test(error.message ?? "")) {
+                this.pauseUntil = Date.now() + 5 * 60 * 1000;
+                console.warn("[AlertService] CoinGecko rate limited — pausing for 5 minutes");
+            }
         }
     }
 }
