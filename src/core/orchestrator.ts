@@ -40,10 +40,41 @@ export class Orchestrator {
         private dispatchFn: (chatId: number, intent: ParsedIntent) => Promise<void>
     ) { }
 
+    /**
+     * Confirmation words that mean "approve the pending payment" — not a new command.
+     * Matched against the full trimmed message (case-insensitive).
+     */
+    private static readonly CONFIRM_PATTERN = /^(yes|evet|confirm|onayla|tamam|devam|ok|go|go ahead|yes go|proceed|let's do it|do it|yap|yap bunu|onaylıyorum|tamamdır|kabul|sure|alright|yep|send it|gönder|gönder bunu)$/i;
+
+    /**
+     * Cancel words that mean "cancel the pending payment review" — not a schedule cancel.
+     */
+    private static readonly CANCEL_PATTERN = /^(cancel|iptal|iptal et|vazgeç|hayır|no|dur|stop|leave it)$/i;
+
     async handleMessage(chatId: number, text: string): Promise<void> {
         if (!text?.trim()) return;
 
         this.memory.addUserMessage(chatId, text);
+
+        // ── Pending-payment guard ──────────────────────────────────────────────
+        // When a payment card is on-screen, intercept pure confirm/cancel text
+        // before it reaches the LLM — the LLM reliably re-creates the payment.
+        const lastAction = this.memory.getContext(chatId).lastAction;
+        if (lastAction === "create_payment") {
+            const trimmed = text.trim();
+            if (Orchestrator.CONFIRM_PATTERN.test(trimmed)) {
+                const msg = "Please use the **Confirm** button above to complete the payment, or **Cancel** to cancel it.";
+                await this.bot.sendMessage(chatId, msg, { parse_mode: "Markdown" });
+                this.memory.addBotMessage(chatId, msg);
+                return;
+            }
+            if (Orchestrator.CANCEL_PATTERN.test(trimmed)) {
+                const msg = "Please use the **Cancel** button above to cancel this payment.";
+                await this.bot.sendMessage(chatId, msg, { parse_mode: "Markdown" });
+                this.memory.addBotMessage(chatId, msg);
+                return;
+            }
+        }
 
         const auth = this.llmKeyStore.getKey(chatId);
         if (!auth) {
