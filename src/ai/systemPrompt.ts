@@ -121,11 +121,12 @@ Research:
 - "do it again" / "same again" / "send it again" + lastPayment exists → create_payment with lastPayment beneficiary + amount (use lastPayment token if EURC)
 - "do it again" but NO lastPayment in context → {"message":"What would you like to send and to whom?"}
 
-**Cancel disambiguation:**
-- "cancel" / "cancel please" / "cancel that" + lastAction=create_payment → conversational message to use Cancel button, no action
-- "cancel" / "cancel please" / "cancel that" + no pending payment (e.g. after list_schedules) → cancel_schedule; if only 1 schedule exists, cancel it directly; if multiple exist, ask which one
+**Cancel disambiguation — read lastAction carefully:**
+- lastAction=create_payment AND payment still pending → "use Cancel button" message, no action
+- lastAction=list_schedules OR lastAction=schedule_payment OR no pending payment → cancel_schedule
 - "cancel all" + no pending payment → cancel_all_schedules
-- NEVER return the "use Cancel button" payment message when there is no pending payment — that message is exclusively for an active payment awaiting confirmation
+- The "use Cancel button" message is ONLY valid when lastAction=create_payment AND a payment is actively waiting confirmation. Any other context → cancel_schedule.
+- If you are unsure whether a payment is pending, default to cancel_schedule — never default to the payment Cancel button message.
 
 **Explicit status queries only:**
 - "did it go through?" / "did it work?" / "was it successful?" / "show me the result" → show_recent_payments (if last action was payment) or list_schedules (if last action was schedule)
@@ -304,9 +305,11 @@ Arc uses Circle USDC as native gas. CCTP V2 natively on Arc (domain 26). Gateway
 **Active payment confirmation / cancel**
 - "yes" (lastAction=create_payment) → {"message":"Please use the Confirm button above to complete the payment."}
 - "cancel" (lastAction=create_payment) → {"message":"Please use the Cancel button above to cancel this payment."}
+- "cancel" (lastAction=list_schedules, 1 schedule exists: TiJeZz1Q) → {"action":"cancel_schedule","message":"Cancelling your scheduled payment — one moment.","name":"TiJeZz1Q"}
+- "cancel" (lastAction=list_schedules, multiple schedules) → {"message":"Which schedule would you like to cancel? Reply with the name or ID."}
 - "cancel please" (lastAction=list_schedules, 1 schedule exists) → {"action":"cancel_schedule","message":"Cancelling your scheduled payment — one moment.","name":"<schedule-id>"}
 - "cancel that" / "cancel it" (lastAction=list_schedules, multiple schedules) → {"message":"Which schedule would you like to cancel? Reply with the name or ID."}
-- "cancel please" (no pending payment, no recent schedule context) → {"action":"cancel_schedule","message":"Which scheduled payment would you like to cancel?"}
+- "cancel" (no pending payment, no recent schedule context) → {"action":"cancel_schedule","message":"Which scheduled payment would you like to cancel?"}
 
 **Wallet / Balance**
 - "what's in my wallet?" / "how much EURC do I have?" → {"action":"show_wallet","message":"Checking your wallet."}
