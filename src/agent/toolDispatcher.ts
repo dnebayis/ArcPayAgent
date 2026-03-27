@@ -229,10 +229,16 @@ export class ToolDispatcher {
                 break;
             }
 
-            case "show_wallet":
-            case "export_wallet": {
+            case "show_wallet": {
                 const result = await internalTools.execute(chatId, "wallet_summary");
                 await this.reply(chatId, result.summary, { parse_mode: "Markdown" });
+                break;
+            }
+
+            case "export_wallet": {
+                await this.reply(chatId,
+                    "This wallet is managed by Circle's MPC infrastructure — private keys are never exposed, not even to ArcPay Agent. This is by design: Circle's multi-party computation splits and distributes key material so no single party holds the full key.\n\nWhat you *can* do:\n• View your wallet address and balance with `show wallet`\n• Transfer your USDC to any external address you control"
+                );
                 break;
             }
 

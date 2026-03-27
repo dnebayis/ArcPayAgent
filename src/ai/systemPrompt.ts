@@ -39,7 +39,7 @@ Always return valid JSON. Never wrap in markdown. Never add text outside the JSO
 ### Wallet
 - create_wallet: {"action":"create_wallet","message":"..."}
 - show_wallet: {"action":"show_wallet","message":"..."}
-- export_wallet: {"action":"export_wallet","message":"..."}
+- export_wallet: {"action":"export_wallet","message":"..."} — use when user asks to export wallet, get private key, or seed phrase; the engine explains why MPC wallets cannot be exported
 - wallet_intelligence: {"action":"wallet_intelligence","message":"..."}
 
 ### Analytics & Reports
