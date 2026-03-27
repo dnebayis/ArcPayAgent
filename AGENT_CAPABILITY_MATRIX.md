@@ -19,6 +19,7 @@ It is meant to be an operational reference, not a product pitch.
 | --- | --- | --- | --- |
 | Wallet | Create a user wallet | `Supported` | One Circle developer-controlled wallet per Telegram user. |
 | Wallet | Show wallet address / account status | `Supported` | Deterministic. |
+| Wallet | Export wallet / private key | `Not Supported` | Circle MPC wallets never expose key material. Agent explains this and redirects to show_wallet or USDC transfer. |
 | Wallet | Live wallet intelligence | `Supported` | Requires healthy Arc RPC / explorer reachability. |
 | Payment | Prepare direct payment to saved vendor | `Supported` | Ends in explicit review + confirm. |
 | Payment | Prepare direct payment to raw `0x...` address | `Supported` | Address validation enforced. |
@@ -55,24 +56,24 @@ It is meant to be an operational reference, not a product pitch.
 | Agent Identity | Show agent registration status | `Supported` | Read-only. |
 | Agent Identity | Show agent ID / validation status | `Supported` | Read-only. |
 | Agent Identity | Reputation / validation writes | `Partial` | Script/admin path exists; not part of user-facing payment flow. Tutorial-aligned KYC validation now uses the dedicated `agent:validation:*:kyc` commands. |
-| Agent Operations | Explain runtime model / safety boundaries | `Supported` | Planner-backed via read-only operational overview. |
+| Agent Operations | Explain runtime model / safety boundaries | `Supported` | LLM-orchestrated via read-only operational overview. |
 | Agent Operations | Summarize current operational posture for this account | `Supported` | Includes wallet presence, saved vendors, schedules, payment-history count, invoice status, and agent identity status. |
 
 ## Conversation Quality Matrix
 
 | Conversation Pattern | Status | Notes |
 | --- | --- | --- |
-| Greeting / small talk | `Supported` | Planner-backed when BYOK is present. |
+| Greeting / small talk | `Supported` | LLM-orchestrated when BYOK is present. |
 | Broad help (`what can you do`) | `Supported` | Deterministic and intentionally short. |
 | Payment help (`I need help with payments`) | `Supported` | Deterministic. |
 | Vendor help (`I need help with a vendor`) | `Supported` | Deterministic. |
-| Short terse commands (`status`, `export wallet`, `pay it anyway`) | `Supported` | Covered by compatibility fast paths plus interpreter routing. |
+| Short terse commands (`status`, `export wallet`, `pay it anyway`) | `Supported` | Handled by the LLM orchestrator; terse commands are resolved via conversation context. |
 | Short natural fragments (`send 1`, `cancel that`, `who last`) | `Partial` | Works when active task/reference context is still present. |
 | Task clearing on social turns | `Supported` | Social/help turns should clear stale invoice/admin tasks. |
 | Invoice follow-up continuity | `Supported` | Context survives through `does this look okay`, `why is this risky`, `pay it`, `leave it for now`. |
 | Referential admin follow-ups | `Supported` | Example: `show the payment before that`. |
 | Long open-ended advisory chat | `Partial` | Not a general-purpose assistant; conversation is still product-scoped. |
-| Operational self-knowledge (`how do you work`, `how do you manage operations`) | `Supported` | Planner-backed in BYOK mode, bounded summary in no-key mode. |
+| Operational self-knowledge (`how do you work`, `how do you manage operations`) | `Supported` | LLM-orchestrated when a key is set; bounded summary otherwise. |
 | Unsupported capability honesty | `Supported` | Agent should say when something is not supported. |
 
 ## Known Limits
@@ -167,19 +168,3 @@ Do not expand capability surface aggressively until transcript-driven smoke test
 
 The current priority should be behavior stability, not feature count.
 
-## Live Regression Status
-
-Current live regression shape:
-
-- family suites for focused areas
-- ultra suites for long end-to-end real Telegram runs
-- restart-per-suite batch runner for clean server state
-
-Live suites now cover real:
-
-- tiny USDC payments
-- invoice uploads
-- natural invoice review captions
-- invoice override flows
-- invoice-linked real payments
-- post-payment cleanup checks
