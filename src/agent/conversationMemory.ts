@@ -21,6 +21,7 @@ export interface ConversationContext {
     lastPayment?: {
         beneficiary: string;
         amount: string;
+        token?: "USDC" | "EURC";
     };
     /** Last schedule that was prepared or created */
     lastSchedule?: {
@@ -89,9 +90,9 @@ export class ConversationMemory {
     }
 
     /** Store the last payment prepared */
-    setLastPayment(chatId: number, beneficiary: string, amount: string): void {
+    setLastPayment(chatId: number, beneficiary: string, amount: string, token?: "USDC" | "EURC"): void {
         const ctx = this.ensure(chatId);
-        ctx.lastPayment = { beneficiary, amount };
+        ctx.lastPayment = { beneficiary, amount, token };
         ctx.lastAction = "create_payment";
     }
 
@@ -203,13 +204,15 @@ export class ConversationMemory {
     describeLastPayment(chatId: number): string | null {
         const payment = this.ensure(chatId).lastPayment;
         if (!payment) return null;
-        return `The last payment I prepared was ${payment.amount} USDC to ${payment.beneficiary}.`;
+        const token = payment.token ?? "USDC";
+        return `The last payment I prepared was ${payment.amount} ${token} to ${payment.beneficiary}.`;
     }
 
     describeLastPaymentAmount(chatId: number): string | null {
         const payment = this.ensure(chatId).lastPayment;
         if (!payment) return null;
-        return `The last payment amount was ${payment.amount} USDC.`;
+        const token = payment.token ?? "USDC";
+        return `The last payment amount was ${payment.amount} ${token}.`;
     }
 
     describeLastInvoiceAmount(chatId: number): string | null {
@@ -256,7 +259,8 @@ export class ConversationMemory {
             parts.push(`[Last analyzed invoice: vendor="${ctx.lastInvoice.vendor}", detected="${detected}", settlement="${settlement}", invoiceNumber="${ctx.lastInvoice.invoiceNumber}"${riskInfo}]`);
         }
         if (ctx.lastPayment) {
-            parts.push(`[Last payment: ${ctx.lastPayment.amount} USDC to ${ctx.lastPayment.beneficiary}]`);
+            const payToken = ctx.lastPayment.token ?? "USDC";
+            parts.push(`[Last payment: ${ctx.lastPayment.amount} ${payToken} to ${ctx.lastPayment.beneficiary}]`);
         }
         if (ctx.lastSchedule) {
             const when = ctx.lastSchedule.scheduledFor ? new Date(ctx.lastSchedule.scheduledFor).toLocaleString("en-US") : "unknown time";

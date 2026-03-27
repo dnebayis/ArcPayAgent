@@ -59,7 +59,7 @@ export class ToolDispatcher {
                 }
                 const token = (intent.token === "EURC") ? "EURC" : "USDC";
                 await paymentEngine.preparePayment(chatId, beneficiary, amount, intent.memo ? String(intent.memo) : "ArcPay", { origin: "byok", token });
-                if (beneficiary) memory.setLastPayment(chatId, beneficiary, String(amount));
+                if (beneficiary) memory.setLastPayment(chatId, beneficiary, String(amount), token);
                 break;
             }
 
