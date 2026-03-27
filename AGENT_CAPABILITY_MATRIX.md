@@ -58,6 +58,12 @@ It is meant to be an operational reference, not a product pitch.
 | Agent Identity | Reputation / validation writes | `Partial` | Script/admin path exists; not part of user-facing payment flow. Tutorial-aligned KYC validation now uses the dedicated `agent:validation:*:kyc` commands. |
 | Agent Operations | Explain runtime model / safety boundaries | `Supported` | LLM-orchestrated via read-only operational overview. |
 | Agent Operations | Summarize current operational posture for this account | `Supported` | Includes wallet presence, saved vendors, schedules, payment-history count, invoice status, and agent identity status. |
+| Live Research | Crypto price lookup | `Supported` | CoinGecko API; BTC, ETH, SOL, and any supported symbol. |
+| Live Research | Fiat FX rate conversion | `Supported` | ECB rates via frankfurter.app; ISO 4217 pairs only (TRY/USD, EUR/GBP, etc.). |
+| Live Research | Crypto price in fiat | `Partial` | Returns USD price with note to multiply by FX rate; direct cross-pair not supported. |
+| Notifications | Incoming payment watch | `Supported` | Polls USDC/EURC balances every 30s; notifies user on balance increase. |
+| Notifications | Price threshold alerts | `Supported` | Above/below threshold per symbol; fires once when threshold is crossed. |
+| Notifications | Conditional payment on price | `Not Supported` | "Send X when BTC hits $Y" — agent redirects to setting a price alert instead. |
 
 ## Conversation Quality Matrix
 
@@ -156,6 +162,22 @@ Use this set after any agent-side refactor:
 - `show agent status`
 - `what is our agent id?`
 - `show agent validation status`
+
+### Notifications & Alerts
+
+- `watch my wallet for incoming payments`
+- `stop watching my wallet`
+- `are my payment notifications on?`
+- `alert me when BTC hits $100000`
+- `notify me when ETH drops below $2000`
+- `show my price alerts`
+- `remove all price alerts`
+
+### FX & Prices
+
+- `how much is bitcoin?`
+- `how much is 1000 TRY in USD?`
+- `what's the EUR/GBP rate?`
 
 ## Current Recommendation
 

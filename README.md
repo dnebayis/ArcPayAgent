@@ -13,6 +13,9 @@ It combines:
 - conversational payment, schedule, vendor, and invoice handling
 - invoice extraction from PDF and image uploads
 - local payment history, reporting, and schedule reminders
+- live crypto price lookups and fiat FX rate conversions (ECB via frankfurter.app)
+- incoming payment notifications — wallet watch polls USDC/EURC balances every 30s
+- price threshold alerts — notifies when a crypto asset crosses a set price
 - optional bring-your-own-key LLM support for richer natural language handling
 - invoice session guards that prevent stale reopen during confirm or after payment
 
@@ -73,6 +76,9 @@ flowchart TD
     E --> F[Domain engines and stores]
     F --> G[Telegram reply]
     C --> G
+    W[WatchService — polls every 30s] -->|incoming payment detected| G
+    AL[AlertService — polls every 60s] -->|price threshold crossed| G
+    SC[SchedulerService — checks every 10s] -->|schedule due| G
 ```
 
 ## Runtime Walkthrough
@@ -121,7 +127,7 @@ flowchart TD
 - `src/storage/`
   Wallets, vendors, invoices, schedules, payment logs, pending payments, submitted Circle transactions, encrypted user LLM config.
 - `src/services/`
-  Scheduler and FX helper services.
+  SchedulerService (schedule reminders every 10s), WatchService (incoming payment polling every 30s), AlertService (price threshold checking every 60s), FX helper.
 
 ## Payment Lifecycle
 
@@ -237,6 +243,8 @@ Persisted runtime data includes:
 - encrypted user LLM credentials
 - pending payment sessions
 - submitted Circle transactions awaiting reconciliation
+- wallet watch settings per user (WatchStore)
+- price alert thresholds per user (AlertStore)
 
 ## Tech Stack
 
@@ -250,6 +258,8 @@ Persisted runtime data includes:
 - `tesseract.js`
 - SQLite (`node:sqlite`)
 - PostgreSQL via `pg` when `DATABASE_URL` is present
+- frankfurter.app (ECB FX rates, no API key required)
+- CoinGecko API (live crypto prices)
 - Vitest
 
 ## Requirements
@@ -487,6 +497,26 @@ The bot supports many natural-language variations, but these are the canonical e
 - `report`
 - `account summary`
 
+### Notifications
+
+- `watch my wallet for incoming payments`
+- `stop watching my wallet`
+- `are my payment notifications on?`
+
+### Price Alerts
+
+- `alert me when BTC hits $100000`
+- `notify me when ETH drops below $2000`
+- `show my price alerts`
+- `remove alert <id>`
+- `remove all price alerts`
+
+### FX Rates
+
+- `how much is 1000 TRY in USD?`
+- `what's the EUR/GBP rate?`
+- `BTC price in TRY` (returns USD price with note)
+
 ### Agent Identity
 
 - `show agent status`
@@ -511,6 +541,9 @@ The bot supports many natural-language variations, but these are the canonical e
 - `how do you work under the hood?`
 - `how much is bitcoin?`
 - `how's the Arc network?`
+- `how much is 1000 TRY in USD?`
+- `alert me when BTC hits $100k`
+- `watch my wallet for incoming payments`
 
 ## HTTP Endpoints
 

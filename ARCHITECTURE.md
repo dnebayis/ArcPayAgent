@@ -37,6 +37,9 @@ flowchart LR
     O -->|dispatch action| D[ToolDispatcher]
     D --> EN[Engines and stores]
     EN --> TG
+    W[WatchService 30s] -->|incoming payment| TG
+    AL[AlertService 60s] -->|price alert| TG
+    SC[SchedulerService 10s] -->|schedule due| TG
 ```
 
 High-level request flow:
@@ -300,6 +303,8 @@ Important stores:
 - `pendingPayments.ts`
 - `submittedTransactions.ts`
 - `userPreferences.ts`
+- `watchStore.ts` — per-user wallet watch settings and last known USDC/EURC balances
+- `alertStore.ts` — per-user price alert thresholds (symbol, target price, direction)
 
 Persistence backend:
 
@@ -314,14 +319,10 @@ Background support services.
 
 Files:
 
-- `scheduler.ts`
-- `fxRateService.ts`
-
-Scheduler behavior:
-
-- checks due schedules every 10 seconds
-- sends a Telegram reminder with action buttons
-- does not auto-pay without user confirmation
+- `scheduler.ts` — checks due schedules every 10s, sends Telegram reminder with action buttons; does not auto-pay
+- `watchService.ts` — polls USDC/EURC balances every 30s for opted-in users; notifies when a balance increase is detected (incoming payment)
+- `alertService.ts` — fetches crypto prices every 60s; fires a Telegram notification when a user-defined price threshold is crossed
+- `fxRateService.ts` — ECB FX rate helper (frankfurter.app, no API key)
 
 ## State Model
 
