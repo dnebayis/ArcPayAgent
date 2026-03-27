@@ -6,11 +6,13 @@ const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 const DEFAULT_CIRCLE_API_URL = "https://api.circle.com/v1/w3s";
 
 const requiredString = (name: string) => z.string().trim().min(1, `${name} is required`);
+const optionalString = () =>
+    z.string().trim().transform((value) => (value.length > 0 ? value : undefined)).optional();
 const evmAddress = (name: string) =>
     requiredString(name).refine((value) => ethers.isAddress(value), `${name} must be a valid EVM address`);
 
 const productionSchema = z.object({
-    TELEGRAM_TOKEN: z.string().trim().optional(),
+    TELEGRAM_TOKEN: optionalString(),
     BOT_USERNAME: z.string().trim().min(1).optional().default("ArcPayAgentBot"),
     ARC_RPC_URL: z.string().trim().url("ARC_RPC_URL must be a valid URL").default(ARC_TESTNET_RPC_URL),
     PAYABLES_ROUTER_ADDRESS: evmAddress("PAYABLES_ROUTER_ADDRESS"),
@@ -20,10 +22,18 @@ const productionSchema = z.object({
     CIRCLE_ENTITY_SECRET: requiredString("CIRCLE_ENTITY_SECRET").regex(/^[0-9a-fA-F]{64}$/, "CIRCLE_ENTITY_SECRET must be a 32-byte hex string"),
     CIRCLE_WALLET_SET_ID: requiredString("CIRCLE_WALLET_SET_ID"),
     CIRCLE_API_URL: z.string().trim().url("CIRCLE_API_URL must be a valid URL").default(DEFAULT_CIRCLE_API_URL),
+    ARC_AGENT_METADATA_URI: optionalString(),
+    ARC_AGENT_OWNER_WALLET_ID: optionalString(),
+    ARC_AGENT_VALIDATOR_WALLET_ID: optionalString(),
+    ARC_AGENT_ID: optionalString(),
+    ARC_AGENT_WALLET_SET_NAME: optionalString(),
+    ERC8004_IDENTITY_REGISTRY_ADDRESS: optionalString(),
+    ERC8004_REPUTATION_REGISTRY_ADDRESS: optionalString(),
+    ERC8004_VALIDATION_REGISTRY_ADDRESS: optionalString(),
 });
 
 const testSchema = z.object({
-    TELEGRAM_TOKEN: z.string().trim().optional(),
+    TELEGRAM_TOKEN: optionalString(),
     BOT_USERNAME: z.string().trim().optional().default("ArcPayAgentBot"),
     ARC_RPC_URL: z.string().trim().optional().default(ARC_TESTNET_RPC_URL),
     PAYABLES_ROUTER_ADDRESS: z.string().trim().optional().default(ZERO_ADDRESS),
@@ -33,6 +43,14 @@ const testSchema = z.object({
     CIRCLE_ENTITY_SECRET: z.string().trim().optional().default("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"),
     CIRCLE_WALLET_SET_ID: z.string().trim().optional().default("test-wallet-set"),
     CIRCLE_API_URL: z.string().trim().optional().default(DEFAULT_CIRCLE_API_URL),
+    ARC_AGENT_METADATA_URI: optionalString(),
+    ARC_AGENT_OWNER_WALLET_ID: optionalString(),
+    ARC_AGENT_VALIDATOR_WALLET_ID: optionalString(),
+    ARC_AGENT_ID: optionalString(),
+    ARC_AGENT_WALLET_SET_NAME: optionalString(),
+    ERC8004_IDENTITY_REGISTRY_ADDRESS: optionalString(),
+    ERC8004_REPUTATION_REGISTRY_ADDRESS: optionalString(),
+    ERC8004_VALIDATION_REGISTRY_ADDRESS: optionalString(),
 });
 
 export type RuntimeConfig = z.infer<typeof productionSchema>;

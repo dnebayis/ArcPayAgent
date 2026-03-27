@@ -7,11 +7,10 @@ import { WalletStore } from "../storage/walletStore";
 import { VendorStore } from "../storage/vendorStore";
 import { PaymentLogStore } from "../storage/paymentLogs";
 import { CircleClient, CircleTransactionStatus } from "../blockchain/circleClient";
-import { SessionStore } from "../agent/sessionStore";
-import { MemoryStore } from "../ai/memoryStore";
 import { PendingPaymentSource, PendingPaymentStore } from "../storage/pendingPayments";
 import { SubmittedTransactionContext, SubmittedTransactionRecord, SubmittedTransactionStatus, SubmittedTransactionStore } from "../storage/submittedTransactions";
 import { getArcGasReserveUsdc, getExpectedArcChainId } from "../blockchain/arcConfig";
+import { escapeTelegramMarkdown } from "../utils/telegramMarkdown";
 
 export interface PendingPayment {
     beneficiary: string;
@@ -24,6 +23,7 @@ export interface PendingPayment {
 }
 
 type ExecutionState = "prepared" | "submitted" | "confirmed" | "failed";
+type PendingPaymentClearReason = "confirmed" | "cancelled" | "failed" | "submitted" | "expired";
 
 export class PaymentEngine {
     private pendingPay: Record<string, PendingPayment> = {};
@@ -39,12 +39,23 @@ export class PaymentEngine {
         private provider: ethers.Provider,
         private paymentLogs: PaymentLogStore,
         private circleClient: CircleClient,
-        private sessionStore?: SessionStore,
-        private memoryStore?: MemoryStore,
         private pendingPaymentStore?: PendingPaymentStore,
         private submittedTransactionStore?: SubmittedTransactionStore,
-        private postConfirmHandler?: (chatId: number, payment: PendingPayment) => void
+        private postConfirmHandler?: (chatId: number, payment: PendingPayment) => void,
+        private postClearHandler?: (chatId: number, payment: PendingPayment, reason: PendingPaymentClearReason) => void,
+        private onMessage?: (chatId: number, msg: string) => void
     ) { }
+
+    private notify(chatId: number, msg: string): void {
+        this.onMessage?.(chatId, msg);
+    }
+
+    private sendAndNotify(chatId: number, msg: string, opts?: any): Promise<TelegramBot.Message> {
+        this.notify(chatId, msg);
+        return opts
+            ? this.bot.sendMessage(chatId, msg, opts)
+            : this.bot.sendMessage(chatId, msg);
+    }
 
     private persistPendingPayment(chatId: number, payment: PendingPayment): void {
         this.pendingPaymentStore?.setPendingPayment(chatId, {
@@ -232,10 +243,6 @@ export class PaymentEngine {
             this.vendorStore.recordPayment(chatId, payment.vendorName, parseFloat(payment.amountStr));
         }
 
-        if (this.memoryStore) {
-            this.memoryStore.recordPayment(chatId, payment.vendorName || payment.beneficiary, parseFloat(payment.amountStr));
-        }
-
         if (this.paymentLogs) {
             this.paymentLogs.logPayment(chatId, {
                 vendor: payment.vendorName,
@@ -248,10 +255,14 @@ export class PaymentEngine {
         }
     }
 
-    private clearPendingPayment(chatId: number): void {
-        delete this.pendingPay[chatId.toString()];
+    private clearPendingPayment(chatId: number, reason: PendingPaymentClearReason = "expired"): void {
+        const chatIdStr = chatId.toString();
+        const payment = this.pendingPay[chatIdStr];
+        delete this.pendingPay[chatIdStr];
         this.pendingPaymentStore?.clearPendingPayment(chatId);
-        if (this.sessionStore) this.sessionStore.clearPendingState(chatId);
+        if (payment) {
+            this.postClearHandler?.(chatId, payment, reason);
+        }
     }
 
     private async resolveSubmittedTransaction(
@@ -264,7 +275,7 @@ export class PaymentEngine {
 
         if (!finalStatus) {
             if (context === "approval") {
-                this.bot.sendMessage(
+                this.sendAndNotify(
                     chatId,
                     `⏳ Approval submitted to Circle.\n\nCircle TxID: \`${txId}\`\nStatus: waiting for final confirmation.\nI’ll continue automatically when Circle reaches a final state.`,
                     { parse_mode: "Markdown" }
@@ -272,12 +283,12 @@ export class PaymentEngine {
                 return "submitted";
             }
 
-            this.bot.sendMessage(
+            this.sendAndNotify(
                 chatId,
                 `⏳ **Payment submitted**\n\nAmount: ${payment.amountStr} USDC\nRecipient: \`${payment.beneficiary}\`\nCircle TxID: \`${txId}\`\n\nCircle is processing the transaction. I’ll update you when it reaches a final status.`,
                 { parse_mode: "Markdown" }
             );
-            this.clearPendingPayment(chatId);
+            this.clearPendingPayment(chatId, "submitted");
             return "submitted";
         }
 
@@ -287,21 +298,24 @@ export class PaymentEngine {
                 return "confirmed";
             }
 
-            this.bot.sendMessage(
+            const arcscanLink = finalStatus.txHash
+                ? `\n[View on ArcScan](https://testnet.arcscan.app/tx/${finalStatus.txHash})`
+                : "";
+            this.sendAndNotify(
                 chatId,
-                `✅ **Payment confirmed**\n\nAmount: ${payment.amountStr} USDC\nRecipient: \`${payment.beneficiary}\`\nCircle TxID: \`${txId}\``,
+                `✅ **Payment confirmed**\n\nAmount: ${payment.amountStr} USDC\nRecipient: \`${payment.beneficiary}\`\nCircle TxID: \`${txId}\`${arcscanLink}`,
                 { parse_mode: "Markdown" }
             );
-            this.finalizePayment(chatId, payment, txId);
+            this.finalizePayment(chatId, payment, finalStatus.txHash || txId);
             payment.onConfirmed?.();
             this.postConfirmHandler?.(chatId, payment);
-            this.clearPendingPayment(chatId);
+            this.clearPendingPayment(chatId, "confirmed");
             return "confirmed";
         }
 
         if (context === "approval") {
             this.clearSubmittedTransaction(chatId);
-            this.bot.sendMessage(
+            this.sendAndNotify(
                 chatId,
                 `❌ Approval failed on Circle.\n\nCircle TxID: \`${txId}\`\nReason: ${this.describeFailure(finalStatus)}`,
                 { parse_mode: "Markdown" }
@@ -310,12 +324,12 @@ export class PaymentEngine {
         }
 
         this.clearSubmittedTransaction(chatId);
-        this.bot.sendMessage(
+        this.sendAndNotify(
             chatId,
             `❌ **Payment failed**\n\nAmount: ${payment.amountStr} USDC\nRecipient: \`${payment.beneficiary}\`\nCircle TxID: \`${txId}\`\nReason: ${this.describeFailure(finalStatus)}`,
             { parse_mode: "Markdown" }
         );
-        this.clearPendingPayment(chatId);
+        this.clearPendingPayment(chatId, "failed");
         return "failed";
     }
 
@@ -335,7 +349,7 @@ export class PaymentEngine {
                 return;
             }
 
-            this.bot.sendMessage(
+            this.sendAndNotify(
                 ensuredRecord.chatId,
                 `❌ Approval failed on Circle.\n\nCircle TxID: \`${ensuredRecord.txId}\`\nReason: ${this.describeFailure(tx)}`,
                 { parse_mode: "Markdown" }
@@ -344,22 +358,43 @@ export class PaymentEngine {
         }
 
         if (this.circleClient.isSuccessfulTerminalState(tx.state)) {
-            this.bot.sendMessage(
+            const arcscanLink = tx.txHash
+                ? `\n[View on ArcScan](https://testnet.arcscan.app/tx/${tx.txHash})`
+                : "";
+            this.sendAndNotify(
                 ensuredRecord.chatId,
-                `✅ **Payment confirmed**\n\nAmount: ${payment.amountStr} USDC\nRecipient: \`${payment.beneficiary}\`\nCircle TxID: \`${ensuredRecord.txId}\``,
+                `✅ **Payment confirmed**\n\nAmount: ${payment.amountStr} USDC\nRecipient: \`${payment.beneficiary}\`\nCircle TxID: \`${ensuredRecord.txId}\`${arcscanLink}`,
                 { parse_mode: "Markdown" }
             );
-            this.finalizePayment(ensuredRecord.chatId, payment, ensuredRecord.txId!);
+            this.finalizePayment(ensuredRecord.chatId, payment, tx.txHash || ensuredRecord.txId!);
             payment.onConfirmed?.();
             this.postConfirmHandler?.(ensuredRecord.chatId, payment);
             return;
         }
 
-        this.bot.sendMessage(
+        this.sendAndNotify(
             ensuredRecord.chatId,
             `❌ **Payment failed**\n\nAmount: ${payment.amountStr} USDC\nRecipient: \`${payment.beneficiary}\`\nCircle TxID: \`${ensuredRecord.txId}\`\nReason: ${this.describeFailure(tx)}`,
             { parse_mode: "Markdown" }
         );
+    }
+
+    static readonly PENDING_EXPIRY_MS = 30 * 60 * 1000; // 30 minutes
+
+    expireOldPendingPayments(): void {
+        if (!this.pendingPaymentStore) return;
+        const now = Date.now();
+        for (const { chatId, payment } of this.pendingPaymentStore.listAll()) {
+            if (this.processingChats.has(chatId.toString())) continue;
+            const age = now - (payment.createdAt ?? now);
+            if (age < PaymentEngine.PENDING_EXPIRY_MS) continue;
+            this.clearPendingPayment(chatId, "expired");
+            const recipient = payment.vendorName || payment.beneficiary;
+            this.sendAndNotify(
+                chatId,
+                `⏰ The pending payment of ${payment.amountStr} USDC to ${recipient} has expired after 30 minutes. Start a new payment when you're ready.`
+            ).catch(() => { });
+        }
     }
 
     async reconcileSubmittedTransactions(): Promise<void> {
@@ -385,41 +420,51 @@ export class PaymentEngine {
         beneficiary: string,
         amountStr: string,
         memo: string | null = "ArcPay",
-        options?: { onConfirmed?: () => void; source?: PendingPaymentSource }
+        options?: { onConfirmed?: () => void; source?: PendingPaymentSource; vendorNameOverride?: string | null; origin?: "no_key" | "byok" }
     ) {
         if (!amountStr || isNaN(parseFloat(amountStr)) || parseFloat(amountStr) <= 0) {
-            this.bot.sendMessage(chatId, "Please enter a valid amount. Example: `send 5 usdc to jack`", { parse_mode: "Markdown" });
+            this.sendAndNotify(chatId, "Please enter a valid amount. Example: `send 5 usdc to jack`", { parse_mode: "Markdown" });
             return;
         }
 
         if (String(beneficiary).startsWith("0x") && !ethers.isAddress(beneficiary)) {
-            this.bot.sendMessage(chatId, "That wallet address looks invalid. Please send a full valid 0x address.");
+            this.sendAndNotify(chatId, "That wallet address looks invalid. Please send a full valid 0x address.");
             return;
         }
 
         let resolvedBeneficiary = beneficiary;
         let vendorName: string | null = null;
-        const inputName = beneficiary;
+        const inputName = options?.vendorNameOverride || beneficiary;
 
         const isWalletAddress = ethers.isAddress(beneficiary);
 
         if (!isWalletAddress) {
-            const vendorAddress = this.vendorStore.getVendor(chatId, inputName);
-            if (vendorAddress) {
-                vendorName = inputName.toLowerCase();
-                resolvedBeneficiary = vendorAddress;
+            const vendorMatch = typeof (this.vendorStore as any).resolveVendor === "function"
+                ? (this.vendorStore as any).resolveVendor(chatId, inputName)
+                : null;
+            if (vendorMatch) {
+                vendorName = vendorMatch.data.displayName || vendorMatch.name;
+                resolvedBeneficiary = vendorMatch.data.address;
             } else {
-                this.bot.sendMessage(chatId, `⚠️ I couldn't find **${inputName}** in your address book.\n\n` +
+                const vendorAddress = this.vendorStore.getVendor(chatId, inputName);
+                if (vendorAddress) {
+                    vendorName = inputName;
+                    resolvedBeneficiary = vendorAddress;
+                } else {
+                this.sendAndNotify(chatId, `⚠️ I couldn't find **${inputName}** in your address book.\n\n` +
                     `**Option 1:** Pay directly with an address:\n\`send ${amountStr} usdc to 0x...\`\n\n` +
                     `**Option 2:** Save the vendor first:\n\`save vendor ${inputName} 0x...\``,
                     { parse_mode: "Markdown" });
                 return;
+                }
             }
+        } else if (options?.vendorNameOverride) {
+            vendorName = options.vendorNameOverride;
         }
 
         const walletAddress = this.walletStore.getWalletAddress(chatId);
         if (!walletAddress) {
-            this.bot.sendMessage(chatId, "You don't have a wallet yet. Send `create wallet` before making payments.", { parse_mode: "Markdown" });
+            this.sendAndNotify(chatId, "You don't have a wallet yet. Send `create wallet` before making payments.", { parse_mode: "Markdown" });
             return;
         }
 
@@ -436,12 +481,8 @@ export class PaymentEngine {
         };
         this.persistPendingPayment(chatId, this.pendingPay[chatId.toString()]);
 
-        if (this.sessionStore) {
-            this.sessionStore.setPendingPayment(chatId, vendorName || beneficiary, parseFloat(amountStr));
-        }
-
         const displayRecipient = vendorName || inputName;
-        const message = `Review payment\n\nAmount: **${amountStr} USDC**\nRecipient: **${displayRecipient}**\nDestination: \`${resolvedBeneficiary}\`${memo ? `\nMemo: ${memo}` : ""}\n\nWhat happens next:\n• I’ll check your balance\n• I’ll check whether approval is needed\n• I’ll submit the payment through Circle after you confirm`;
+        const message = `Review payment\n\nAmount: **${amountStr} USDC**\nRecipient: **${escapeTelegramMarkdown(displayRecipient)}**\nDestination: \`${resolvedBeneficiary}\`${memo ? `\nMemo: ${escapeTelegramMarkdown(memo)}` : ""}\n\nWhat happens next:\n• I’ll check your balance\n• I’ll check whether approval is needed\n• I’ll submit the payment through Circle after you confirm`;
 
         const inlineKeyboard = [
             [
@@ -450,7 +491,7 @@ export class PaymentEngine {
             ]
         ];
 
-        this.bot.sendMessage(chatId, message, {
+        this.sendAndNotify(chatId, message, {
             parse_mode: "Markdown",
             reply_markup: {
                 inline_keyboard: inlineKeyboard
@@ -461,10 +502,103 @@ export class PaymentEngine {
     cancelPendingPayment(chatId: number) {
         const chatIdStr = chatId.toString();
         if (this.pendingPay[chatIdStr] || this.hydratePendingPayment(chatId)) {
-            this.clearPendingPayment(chatId);
-            this.bot.sendMessage(chatId, "✅ Payment cancelled.");
+            this.clearPendingPayment(chatId, "cancelled");
+            this.sendAndNotify(chatId, "✅ Payment cancelled.");
         } else {
-            this.bot.sendMessage(chatId, "❌ No pending payment to cancel.");
+            this.sendAndNotify(chatId, "❌ No pending payment to cancel.");
+        }
+    }
+
+    resetPendingPayment(chatId: number): boolean {
+        const chatIdStr = chatId.toString();
+        if (this.pendingPay[chatIdStr] || this.hydratePendingPayment(chatId)) {
+            this.clearPendingPayment(chatId, "cancelled");
+            return true;
+        }
+
+        return false;
+    }
+
+    async confirmPendingPayment(chatId: number) {
+        if (!this.beginProcessing(chatId)) {
+            this.sendAndNotify(chatId, "This payment is already processing.");
+            return;
+        }
+
+        try {
+            const submitted = this.getSubmittedTransaction(chatId);
+            if (submitted) {
+                this.sendAndNotify(
+                    chatId,
+                    submitted.context === "approval"
+                        ? "Approval is already processing on Circle."
+                        : "Payment is already processing on Circle."
+                );
+                return;
+            }
+
+            const payment = this.pendingPay[chatId.toString()] || this.hydratePendingPayment(chatId);
+            if (!payment) {
+                this.sendAndNotify(chatId, "❌ No pending payment to confirm.");
+                return;
+            }
+
+            const walletId = this.walletStore.getWalletId(chatId);
+            const walletAddress = this.walletStore.getWalletAddress(chatId);
+            if (!walletId || !walletAddress) {
+                this.sendAndNotify(chatId, "You don't have a wallet ready for payments yet.");
+                return;
+            }
+
+            const networkError = await this.validateArcNetwork();
+            if (networkError) {
+                this.sendAndNotify(chatId, networkError, { parse_mode: "Markdown" });
+                return;
+            }
+
+            const balance = await this.usdc.balanceOf(walletAddress);
+            const gasReserve = getArcGasReserveUsdc();
+            const totalRequired = payment.amount + gasReserve;
+
+            if (balance < totalRequired) {
+                this.sendAndNotify(
+                    chatId,
+                    `❌ **Insufficient balance**\n\nPayment: ${payment.amountStr} USDC\nArc gas reserve: ${ethers.formatUnits(gasReserve, 6)} USDC\nTotal required: ${ethers.formatUnits(totalRequired, 6)} USDC\nAvailable: ${ethers.formatUnits(balance, 6)} USDC\n\nArc uses USDC for gas, so keep a small extra balance before confirming.`,
+                    { parse_mode: "Markdown" }
+                );
+                this.clearPendingPayment(chatId, "failed");
+                return;
+            }
+
+            const currentAllowance = await this.usdc.allowance(walletAddress, this.routerAddress);
+            const needsApproval = currentAllowance < payment.amount;
+
+            if (needsApproval) {
+                this.sendAndNotify(chatId, "Submitting approval to Circle. This can take a few moments...");
+
+                const encodedApprove = this.usdc.encodeApprove(this.routerAddress, payment.amount);
+                const record = this.createSubmissionAttempt(chatId, walletId, payment, "approval");
+                const txId = await this.circleClient.createTransaction(walletId, this.usdc.getAddress(), encodedApprove, record.idempotencyKey);
+                this.markSubmittedTransaction(record, txId);
+                this.clearPendingPayment(chatId, "submitted");
+                const approvalState = await this.resolveSubmittedTransaction(chatId, payment, txId, "approval");
+
+                if (approvalState === "confirmed") {
+                    await this.executeRouterPayment(chatId, walletId, payment);
+                }
+                return;
+            }
+
+            await this.executeRouterPayment(chatId, walletId, payment);
+        } catch (error: any) {
+            const errMsg = error.message || "";
+            const userMsg = errMsg.includes("transfer_failed") || errMsg.includes("insufficient funds")
+                ? "❌ USDC transfer failed due to balance or gas limit rules."
+                : `❌ Circle transaction failed: ${errMsg.substring(0, 200)}`;
+            this.sendAndNotify(chatId, userMsg);
+            this.clearPendingPayment(chatId, "failed");
+        } finally {
+            this.endProcessing(chatId);
         }
     }
 
@@ -473,7 +607,7 @@ export class PaymentEngine {
         const payment = this.pendingPay[chatIdStr] || this.hydratePendingPayment(chatId);
 
         if (!payment) {
-            this.bot.sendMessage(chatId, "❌ No pending payment found to update.");
+            this.sendAndNotify(chatId, "❌ No pending payment found to update.");
             return;
         }
 
@@ -490,7 +624,7 @@ export class PaymentEngine {
 
         if (updates.vendor) {
             if (String(updates.vendor).startsWith("0x") && !ethers.isAddress(updates.vendor)) {
-                this.bot.sendMessage(chatId, "That wallet address looks invalid. Please send a full valid 0x address.");
+                this.sendAndNotify(chatId, "That wallet address looks invalid. Please send a full valid 0x address.");
                 return;
             }
 
@@ -499,24 +633,29 @@ export class PaymentEngine {
                 payment.beneficiary = updates.vendor;
                 payment.vendorName = null;
             } else {
-                const vendorAddress = this.vendorStore.getVendor(chatId, updates.vendor);
-                if (vendorAddress) {
-                    payment.vendorName = updates.vendor.toLowerCase();
-                    payment.beneficiary = vendorAddress;
+                const vendorMatch = typeof (this.vendorStore as any).resolveVendor === "function"
+                    ? (this.vendorStore as any).resolveVendor(chatId, updates.vendor)
+                    : null;
+                if (vendorMatch) {
+                    payment.vendorName = vendorMatch.data.displayName || vendorMatch.name;
+                    payment.beneficiary = vendorMatch.data.address;
                 } else {
-                    this.bot.sendMessage(chatId, `⚠️ I couldn't find **${updates.vendor}** in your address book.`, { parse_mode: "Markdown" });
-                    return;
+                    const vendorAddress = this.vendorStore.getVendor(chatId, updates.vendor);
+                    if (vendorAddress) {
+                        payment.vendorName = updates.vendor;
+                        payment.beneficiary = vendorAddress;
+                    } else {
+                        this.sendAndNotify(chatId, `⚠️ I couldn't find **${escapeTelegramMarkdown(updates.vendor)}** in your address book.`, { parse_mode: "Markdown" });
+                        return;
+                    }
                 }
             }
         }
 
-        if (this.sessionStore) {
-            this.sessionStore.updatePendingPayment(chatId, { vendor: payment.vendorName || payment.beneficiary, amount: parseFloat(payment.amountStr) });
-        }
         this.persistPendingPayment(chatId, payment);
 
         const displayRecipient = payment.vendorName || payment.beneficiary;
-        const message = `Payment updated\n\nAmount: **${payment.amountStr} USDC**\nRecipient: **${displayRecipient}**\nDestination: \`${payment.beneficiary}\`${updatedMemo ? `\nMemo: ${updatedMemo}` : ""}\n\nWhat happens next:\n• I’ll check your balance\n• I’ll check whether approval is needed\n• I’ll submit the payment through Circle after you confirm`;
+        const message = `Payment updated\n\nAmount: **${payment.amountStr} USDC**\nRecipient: **${escapeTelegramMarkdown(displayRecipient)}**\nDestination: \`${payment.beneficiary}\`${updatedMemo ? `\nMemo: ${escapeTelegramMarkdown(updatedMemo)}` : ""}\n\nWhat happens next:\n• I’ll check your balance\n• I’ll check whether approval is needed\n• I’ll submit the payment through Circle after you confirm`;
 
         const inlineKeyboard = [
             [
@@ -525,7 +664,7 @@ export class PaymentEngine {
             ]
         ];
 
-        this.bot.sendMessage(chatId, message, {
+        this.sendAndNotify(chatId, message, {
             parse_mode: "Markdown",
             reply_markup: {
                 inline_keyboard: inlineKeyboard
@@ -555,7 +694,7 @@ export class PaymentEngine {
         const chatIdStr = chatId.toString();
 
         if (action === "cancel") {
-            this.clearPendingPayment(chatId);
+            this.clearPendingPayment(chatId, "cancelled");
             this.bot.editMessageText("Payment cancelled.", {
                 chat_id: query.message.chat.id,
                 message_id: query.message.message_id
@@ -610,7 +749,7 @@ export class PaymentEngine {
                         message_id: query.message.message_id,
                         parse_mode: "Markdown"
                     });
-                    this.clearPendingPayment(chatId);
+                    this.clearPendingPayment(chatId, "failed");
                     return;
                 }
 
@@ -647,7 +786,7 @@ export class PaymentEngine {
                 const record = this.createSubmissionAttempt(chatId, walletId, payment, "approval");
                 const txId = await this.circleClient.createTransaction(walletId, this.usdc.getAddress(), encodedApprove, record.idempotencyKey);
                 this.markSubmittedTransaction(record, txId);
-                this.clearPendingPayment(chatId);
+                this.clearPendingPayment(chatId, "submitted");
                 const approvalState = await this.resolveSubmittedTransaction(chatId, payment, txId, "approval");
 
                 if (approvalState === "confirmed") {
@@ -665,8 +804,8 @@ export class PaymentEngine {
                 userMsg = `❌ Circle transaction failed: ${errMsg.substring(0, 200)}`;
             }
 
-            this.bot.sendMessage(chatId, userMsg);
-            this.clearPendingPayment(chatId);
+            this.sendAndNotify(chatId, userMsg);
+            this.clearPendingPayment(chatId, "failed");
         } finally {
             this.endProcessing(chatId);
         }
@@ -684,8 +823,8 @@ export class PaymentEngine {
         const record = this.createSubmissionAttempt(chatId, walletId, payment, "payment");
         const txId = await this.circleClient.createTransaction(walletId, this.routerAddress, encodedPay, record.idempotencyKey);
         this.markSubmittedTransaction(record, txId);
-        this.clearPendingPayment(chatId);
-        this.bot.sendMessage(chatId, `⏳ **Payment submitted**\n\nAmount: ${payment.amountStr} USDC\nRecipient: \`${payment.beneficiary}\`\nCircle TxID: \`${txId}\`\n\nCircle is processing the transaction. I’ll update you when it reaches a final status.`, {
+        this.clearPendingPayment(chatId, "submitted");
+        this.sendAndNotify(chatId, `⏳ **Payment submitted**\n\nAmount: ${payment.amountStr} USDC\nRecipient: \`${payment.beneficiary}\`\nCircle TxID: \`${txId}\`\n\nCircle is processing the transaction. I’ll update you when it reaches a final status.`, {
             parse_mode: "Markdown"
         });
         await this.resolveSubmittedTransaction(chatId, payment, txId, "payment");

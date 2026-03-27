@@ -1,19 +1,58 @@
 import TelegramBot from "node-telegram-bot-api";
 import { PaymentLogStore, PaymentLogEntry } from "../storage/paymentLogs";
+import { formatUsdcAmount } from "../utils/formatUsdcAmount";
+import { escapeTelegramMarkdown } from "../utils/telegramMarkdown";
+
+export type MessageCallback = (chatId: number, msg: string) => void;
 
 export class AnalyticsEngine {
     constructor(
         private bot: TelegramBot,
-        private paymentLogs: PaymentLogStore
+        private paymentLogs: PaymentLogStore,
+        private onMessage?: MessageCallback
     ) { }
+
+    private async send(chatId: number, msg: string, opts?: TelegramBot.SendMessageOptions): Promise<void> {
+        const args: [number, string, TelegramBot.SendMessageOptions?] = opts
+            ? [chatId, msg, opts]
+            : [chatId, msg];
+        await this.bot.sendMessage(...args).catch(() =>
+            this.bot.sendMessage(chatId, msg)
+        );
+        this.onMessage?.(chatId, msg);
+    }
+
+    private getPeriodWindow(period: "all" | "month" | "week"): { since?: number; label: string } {
+        const now = Date.now();
+
+        if (period === "month") {
+            return {
+                since: now - 30 * 24 * 60 * 60 * 1000,
+                label: "Last 30 Days"
+            };
+        }
+
+        if (period === "week") {
+            return {
+                since: now - 7 * 24 * 60 * 60 * 1000,
+                label: "Last 7 Days"
+            };
+        }
+
+        return { label: "All Time" };
+    }
+
+    private getPayments(chatId: number, since?: number): PaymentLogEntry[] {
+        return since
+            ? this.paymentLogs.getPaymentsSince(chatId, since)
+            : this.paymentLogs.getPayments(chatId);
+    }
 
     /**
      * Total spending (all time or since a given timestamp)
      */
     getTotalSpending(chatId: number, since?: number): number {
-        const payments = since
-            ? this.paymentLogs.getPaymentsSince(chatId, since)
-            : this.paymentLogs.getPayments(chatId);
+        const payments = this.getPayments(chatId, since);
         return payments.reduce((sum, p) => sum + p.amount, 0);
     }
 
@@ -21,9 +60,7 @@ export class AnalyticsEngine {
      * Spending grouped by vendor
      */
     getSpendingByVendor(chatId: number, since?: number): { vendor: string; total: number; count: number }[] {
-        const payments = since
-            ? this.paymentLogs.getPaymentsSince(chatId, since)
-            : this.paymentLogs.getPayments(chatId);
+        const payments = this.getPayments(chatId, since);
 
         const map: Record<string, { total: number; count: number }> = {};
         for (const p of payments) {
@@ -59,84 +96,114 @@ export class AnalyticsEngine {
     /**
      * Show spending report to user
      */
-    showReport(chatId: number, period: "all" | "month" | "week" = "month"): void {
-        const now = Date.now();
-        let since: number | undefined;
-        let periodLabel = "All Time";
-
-        if (period === "month") {
-            since = now - 30 * 24 * 60 * 60 * 1000;
-            periodLabel = "Last 30 Days";
-        } else if (period === "week") {
-            since = now - 7 * 24 * 60 * 60 * 1000;
-            periodLabel = "Last 7 Days";
-        }
-
+    async showReport(chatId: number, period: "all" | "month" | "week" = "month"): Promise<void> {
+        const { since, label: periodLabel } = this.getPeriodWindow(period);
+        const payments = this.getPayments(chatId, since);
         const total = this.getTotalSpending(chatId, since);
         const byVendor = this.getSpendingByVendor(chatId, since);
 
         if (total === 0) {
-            this.bot.sendMessage(chatId, "📊 No payments recorded yet. Start sending payments to see your analytics!");
+            await this.send(chatId, "📊 No payments recorded yet. Start sending payments to see your analytics!");
             return;
         }
 
         let msg = `📊 **Spending Report — ${periodLabel}**\n\n`;
+        msg += `💰 **Total spend:** ${formatUsdcAmount(total)} USDC\n`;
+        msg += `🧾 **Payments:** ${payments.length}\n`;
+        msg += `🏷️ **Active vendors:** ${byVendor.length}\n`;
 
         if (byVendor.length > 0) {
-            for (const v of byVendor) {
-                const pct = ((v.total / total) * 100).toFixed(0);
-                msg += `• **${v.vendor}** → ${v.total} USDC (${v.count} payments, ${pct}%)\n`;
-            }
-            msg += `\n💰 **Total: ${total} USDC**`;
+            const topVendor = byVendor[0];
+            msg += `🥇 **Top vendor:** ${escapeTelegramMarkdown(topVendor.vendor)} (${formatUsdcAmount(topVendor.total)} USDC)\n`;
         }
 
-        this.bot.sendMessage(chatId, msg, { parse_mode: "Markdown" });
+        msg += "\n";
+
+        if (byVendor.length > 0) {
+            msg += "**Top spend categories**\n";
+            for (const v of byVendor.slice(0, 5)) {
+                const pct = ((v.total / total) * 100).toFixed(0);
+                msg += `• **${escapeTelegramMarkdown(v.vendor)}** → ${formatUsdcAmount(v.total)} USDC (${v.count} payments, ${pct}%)\n`;
+            }
+        }
+
+        await this.send(chatId, msg, { parse_mode: "Markdown" });
+    }
+
+    /**
+     * Show vendor-focused spending breakdown
+     */
+    async showVendorBreakdown(chatId: number, period: "all" | "month" | "week" = "all"): Promise<void> {
+        const { since, label: periodLabel } = this.getPeriodWindow(period);
+        const total = this.getTotalSpending(chatId, since);
+        const byVendor = this.getSpendingByVendor(chatId, since);
+
+        if (byVendor.length === 0) {
+            await this.send(chatId, "📊 No vendor spending recorded yet.");
+            return;
+        }
+
+        let msg = `📊 **Vendor Breakdown — ${periodLabel}**\n\n`;
+
+        byVendor.forEach((vendor, index) => {
+            const pct = ((vendor.total / total) * 100).toFixed(0);
+            msg += `${index + 1}. **${escapeTelegramMarkdown(vendor.vendor)}**\n`;
+            msg += `   ${formatUsdcAmount(vendor.total)} USDC across ${vendor.count} payment${vendor.count === 1 ? "" : "s"} (${pct}%)\n`;
+        });
+
+        msg += `\n💰 **Total vendor spend: ${formatUsdcAmount(total)} USDC**`;
+
+        await this.send(chatId, msg, { parse_mode: "Markdown" });
     }
 
     /**
      * Show recent payment history
      */
-    showHistory(chatId: number, limit: number = 10): void {
+    async showHistory(chatId: number, limit: number = 10): Promise<void> {
         const recent = this.paymentLogs.getRecentPayments(chatId, limit);
 
         if (recent.length === 0) {
-            this.bot.sendMessage(chatId, "📜 No payment history yet.\n\nOnce you send a payment, it will appear here.");
+            await this.send(chatId, "📜 No payment history yet.\n\nOnce you send a payment, it will appear here.");
             return;
         }
 
         const total = recent.reduce((sum, payment) => sum + payment.amount, 0);
         let msg = `📜 **Payment History**\n\n`;
         msg += `Entries shown: **${recent.length}**\n`;
-        msg += `Total in view: **${total} USDC**\n\n`;
+        msg += `Total in view: **${formatUsdcAmount(total)} USDC**\n\n`;
 
         for (const p of recent.reverse()) {
             const date = new Date(p.timestamp);
             const dateStr = `${date.getMonth() + 1}/${date.getDate()}`;
-            const target = p.vendor || `${p.address.slice(0, 8)}...`;
-            msg += `• ${dateStr} — **${p.amount} USDC** → ${target}\n`;
+            const target = p.vendor ? escapeTelegramMarkdown(p.vendor) : `${p.address.slice(0, 8)}...`;
+            msg += `• ${dateStr} — **${formatUsdcAmount(p.amount)} USDC** → ${target}\n`;
         }
 
         msg += `\nTip: use \`account summary\` for a broader account view.`;
 
-        this.bot.sendMessage(chatId, msg, { parse_mode: "Markdown" });
+        await this.send(chatId, msg, { parse_mode: "Markdown" });
     }
 
     /**
      * Show monthly breakdown
      */
-    showMonthlyBreakdown(chatId: number): void {
+    async showMonthlyBreakdown(chatId: number): Promise<void> {
         const monthly = this.getMonthlySpending(chatId);
 
         if (monthly.length === 0) {
-            this.bot.sendMessage(chatId, "📅 No monthly data yet.");
+            await this.send(chatId, "📅 No monthly data yet.");
             return;
         }
 
         let msg = "📅 **Monthly Spending**\n\n";
+        const grandTotal = monthly.reduce((sum, month) => sum + month.total, 0);
+        msg += `💰 **Lifetime spend tracked:** ${formatUsdcAmount(grandTotal)} USDC\n`;
+        msg += `🗓️ **Months with activity:** ${monthly.length}\n\n`;
+
         for (const m of monthly) {
-            msg += `• **${m.month}** → ${m.total} USDC\n`;
+            msg += `• **${m.month}** → ${formatUsdcAmount(m.total)} USDC\n`;
         }
 
-        this.bot.sendMessage(chatId, msg, { parse_mode: "Markdown" });
+        await this.send(chatId, msg, { parse_mode: "Markdown" });
     }
 }

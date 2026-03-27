@@ -26,13 +26,13 @@ services:
         sync: false
       - key: LLM_KEY_SECRET
         sync: false
-      - key: WALLET_SECRET
-        sync: false
       - key: CIRCLE_API_KEY
         sync: false
       - key: CIRCLE_ENTITY_SECRET
         sync: false
       - key: CIRCLE_WALLET_SET_ID
+        sync: false
+      - key: ARC_GAS_RESERVE_USDC
         sync: false
       - key: PAYMENT_HISTORY_SOURCE
         sync: false
@@ -40,7 +40,27 @@ services:
         sync: false
       - key: PAYMENT_HISTORY_WINDOWS
         sync: false
+      - key: CIRCLE_TX_POLL_ATTEMPTS
+        sync: false
+      - key: CIRCLE_TX_POLL_INTERVAL_MS
+        sync: false
       - key: LOG_INTENT
         sync: false
       - key: DATABASE_URL
+        sync: false
+      - key: ARC_AGENT_METADATA_URI
+        sync: false
+      - key: ARC_AGENT_ID
+        sync: false
+      - key: ARC_AGENT_OWNER_WALLET_ID
+        sync: false
+      - key: ARC_AGENT_VALIDATOR_WALLET_ID
+        sync: false
+      - key: ARC_AGENT_WALLET_SET_NAME
+        sync: false
+      - key: ERC8004_IDENTITY_REGISTRY_ADDRESS
+        sync: false
+      - key: ERC8004_REPUTATION_REGISTRY_ADDRESS
+        sync: false
+      - key: ERC8004_VALIDATION_REGISTRY_ADDRESS
         sync: false

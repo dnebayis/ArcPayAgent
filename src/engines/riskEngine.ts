@@ -8,6 +8,28 @@ export interface RiskResult {
     level: "SAFE" | "REVIEW" | "HIGH_RISK";
 }
 
+const FLAG_DESCRIPTIONS: Record<string, string> = {
+    duplicate_invoice: "Duplicate invoice number detected",
+    unusual_amount: "Amount is unusually high for this vendor",
+    vendor_mismatch: "Unknown vendor — not in your address book",
+    missing_fields: "Some invoice fields are missing",
+    suspicious_language: "Suspicious urgency language detected"
+};
+
+const FLAG_EXPLANATIONS: Record<string, string> = {
+    duplicate_invoice: "This invoice number matches a previously seen invoice, so it could be a duplicate or a resend.",
+    unusual_amount: "The amount is much higher than this vendor's usual pattern, so it needs a manual review.",
+    vendor_mismatch: "The vendor is not saved in your address book yet, so I can't verify it against a known payment target.",
+    missing_fields: "Some important invoice fields are missing or unclear, which makes the invoice harder to verify safely.",
+    suspicious_language: "The invoice text uses urgency language that often appears in risky or manipulative payment requests."
+};
+
+const RISK_RECOMMENDATIONS = {
+    SAFE: "You can continue with payment preparation.",
+    REVIEW: "Review the flagged details before paying. If everything checks out, you can continue manually.",
+    HIGH_RISK: "Do not continue until you verify the invoice details manually."
+} as const;
+
 const SUSPICIOUS_KEYWORDS = [
     "urgent",
     "immediate payment",
@@ -190,14 +212,6 @@ export class RiskEngine {
      * Format risk result for display
      */
     static formatRiskMessage(result: RiskResult): string {
-        const flagDescriptions: Record<string, string> = {
-            duplicate_invoice: "⚠️ Duplicate invoice number detected",
-            unusual_amount: "⚠️ Amount is unusually high for this vendor",
-            vendor_mismatch: "⚠️ Unknown vendor — not in your address book",
-            missing_fields: "⚠️ Some invoice fields are missing",
-            suspicious_language: "⚠️ Suspicious urgency language detected"
-        };
-
         if (result.flags.length === 0) return "";
 
         let msg = "\n\n";
@@ -209,11 +223,70 @@ export class RiskEngine {
 
         msg += "Flags:\n";
         for (const flag of result.flags) {
-            msg += `• ${flagDescriptions[flag] || flag}\n`;
+            msg += `• ⚠️ ${FLAG_DESCRIPTIONS[flag] || flag}\n`;
         }
 
         msg += `\nRisk Score: ${(result.riskScore * 100).toFixed(0)}%`;
 
         return msg;
+    }
+
+    static explainFlags(result: RiskResult): string[] {
+        return result.flags.map((flag) => FLAG_EXPLANATIONS[flag] || flag);
+    }
+
+    static formatConversationalSummary(
+        vendor: string,
+        result: RiskResult,
+        options?: {
+            canPreparePayment?: boolean;
+            settlementAmount?: string | null;
+            settlementCurrency?: string | null;
+        }
+    ): string {
+        const score = Math.round(result.riskScore * 100);
+        const amount = options?.settlementAmount;
+        const currency = options?.settlementCurrency || "USDC";
+        const explanations = this.explainFlags(result);
+
+        if (result.level === "SAFE") {
+            const nextStep = amount
+                ? ` It looks safe enough to prepare a payment for ${amount} ${currency}.`
+                : " It looks safe enough to continue.";
+            return `This invoice from ${vendor} looks safe right now (${score}% risk). I didn't find any warning flags.${nextStep}`;
+        }
+
+        const intro = result.level === "HIGH_RISK"
+            ? `This invoice from ${vendor} looks high risk (${score}% risk).`
+            : `This invoice from ${vendor} needs review (${score}% risk).`;
+        const why = explanations.length
+            ? ` I found ${explanations.length === 1 ? "this issue" : "these issues"}: ${explanations.join(" ")}`
+            : "";
+
+        if (result.level === "HIGH_RISK") {
+            return `${intro}${why} I won't prepare the payment automatically until you review it.`;
+        }
+
+        if (options?.canPreparePayment && amount) {
+            return `${intro}${why} If everything looks correct, I can still prepare a payment for ${amount} ${currency} when you ask.`;
+        }
+
+        return `${intro}${why} Save the vendor first or review the invoice details before paying it.`;
+    }
+
+    static formatRecommendation(result: RiskResult, options?: { canPreparePayment?: boolean }): string {
+        if (result.level === "SAFE") {
+            return RISK_RECOMMENDATIONS.SAFE;
+        }
+
+        if (result.level === "HIGH_RISK") {
+            return RISK_RECOMMENDATIONS.HIGH_RISK;
+        }
+
+        if (options?.canPreparePayment) {
+            return "Review the flagged details before paying. If everything looks right, you can still prepare the payment.";
+        }
+
+        return "Review the flagged details and save the vendor first before paying.";
     }
 }

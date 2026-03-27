@@ -4,6 +4,7 @@ const VENDOR_FILE = "vendors.json";
 
 export interface VendorData {
     address: string;
+    displayName?: string;
     totalPaid: number;
     invoiceCount: number;
     lastPayment: number | null;
@@ -12,6 +13,11 @@ export interface VendorData {
 
 export interface UserVendors {
     vendors: Record<string, VendorData>;
+}
+
+export interface VendorMatch {
+    name: string;
+    data: VendorData;
 }
 
 export class VendorStore {
@@ -42,6 +48,7 @@ export class VendorStore {
                     // Old format — migrate
                     vendors[name] = {
                         address: value,
+                        displayName: name,
                         totalPaid: 0,
                         invoiceCount: 0,
                         lastPayment: null,
@@ -49,7 +56,10 @@ export class VendorStore {
                     };
                 } else if (typeof value === "object" && value !== null && (value as any).address) {
                     // New format — keep as is
-                    vendors[name] = value as VendorData;
+                    vendors[name] = {
+                        displayName: name,
+                        ...(value as VendorData)
+                    };
                 }
             }
             migrated[chatId] = { vendors };
@@ -71,10 +81,47 @@ export class VendorStore {
             .trim();
     }
 
+    private collapseVendorName(name: string): string {
+        return this.normalizeVendorName(name).replace(/\s+/g, "");
+    }
+
+    private computeSimilarity(a: string, b: string): number {
+        if (!a || !b) return 0;
+        if (a === b) return 1;
+
+        const longer = a.length >= b.length ? a : b;
+        const shorter = a.length >= b.length ? b : a;
+
+        if (longer.includes(shorter) && shorter.length >= 4) {
+            return shorter.length / longer.length;
+        }
+
+        const bigrams = (value: string): Set<string> => {
+            if (value.length < 2) return new Set([value]);
+            const set = new Set<string>();
+            for (let i = 0; i < value.length - 1; i++) {
+                set.add(value.slice(i, i + 2));
+            }
+            return set;
+        };
+
+        const aBigrams = bigrams(a);
+        const bBigrams = bigrams(b);
+        let overlap = 0;
+        for (const gram of aBigrams) {
+            if (bBigrams.has(gram)) {
+                overlap += 1;
+            }
+        }
+
+        return (2 * overlap) / (aBigrams.size + bBigrams.size);
+    }
+
     private findVendorEntry(chatId: string | number, name: string): [string, VendorData] | null {
         const id = chatId.toString();
         const vendors = this.store[id]?.vendors || {};
         const requested = this.normalizeVendorName(name);
+        const requestedCollapsed = this.collapseVendorName(name);
 
         for (const [storedName, data] of Object.entries(vendors)) {
             if (storedName === name.toLowerCase()) {
@@ -83,6 +130,30 @@ export class VendorStore {
             if (this.normalizeVendorName(storedName) === requested) {
                 return [storedName, data];
             }
+            if (this.collapseVendorName(storedName) === requestedCollapsed) {
+                return [storedName, data];
+            }
+        }
+
+        let bestMatch: [string, VendorData] | null = null;
+        let bestScore = 0;
+        let secondBestScore = 0;
+
+        for (const [storedName, data] of Object.entries(vendors)) {
+            const storedCollapsed = this.collapseVendorName(storedName);
+            const score = this.computeSimilarity(storedCollapsed, requestedCollapsed);
+
+            if (score > bestScore) {
+                secondBestScore = bestScore;
+                bestScore = score;
+                bestMatch = [storedName, data];
+            } else if (score > secondBestScore) {
+                secondBestScore = score;
+            }
+        }
+
+        if (bestMatch && bestScore >= 0.86 && bestScore - secondBestScore >= 0.08) {
+            return bestMatch;
         }
 
         return null;
@@ -100,6 +171,7 @@ export class VendorStore {
         const existing = this.store[id].vendors[vendorName];
         this.store[id].vendors[vendorName] = {
             address,
+            displayName: name.trim(),
             totalPaid: existing?.totalPaid || 0,
             invoiceCount: existing?.invoiceCount || 0,
             lastPayment: existing?.lastPayment || null,
@@ -109,13 +181,51 @@ export class VendorStore {
     }
 
     getVendor(chatId: string | number, name: string): string | null {
-        const entry = this.findVendorEntry(chatId, name);
-        return entry ? entry[1].address : null;
+        const entry = this.resolveVendor(chatId, name);
+        return entry ? entry.data.address : null;
+    }
+
+    getVendorNameByAddress(chatId: string | number, address: string): string | null {
+        const id = chatId.toString();
+        const normalizedAddress = address.toLowerCase();
+        const vendors = this.store[id]?.vendors || {};
+
+        for (const [name, data] of Object.entries(vendors)) {
+            if (data.address.toLowerCase() === normalizedAddress) {
+                return name;
+            }
+        }
+
+        return null;
+    }
+
+    getVendorDisplayName(chatId: string | number, name: string): string | null {
+        const entry = this.resolveVendor(chatId, name);
+        return entry ? (entry.data.displayName || entry.name) : null;
+    }
+
+    getVendorDisplayNameByAddress(chatId: string | number, address: string): string | null {
+        const id = chatId.toString();
+        const normalizedAddress = address.toLowerCase();
+        const vendors = this.store[id]?.vendors || {};
+
+        for (const [name, data] of Object.entries(vendors)) {
+            if (data.address.toLowerCase() === normalizedAddress) {
+                return data.displayName || name;
+            }
+        }
+
+        return null;
     }
 
     getVendorData(chatId: string | number, name: string): VendorData | null {
+        const entry = this.resolveVendor(chatId, name);
+        return entry ? entry.data : null;
+    }
+
+    resolveVendor(chatId: string | number, name: string): VendorMatch | null {
         const entry = this.findVendorEntry(chatId, name);
-        return entry ? entry[1] : null;
+        return entry ? { name: entry[0], data: entry[1] } : null;
     }
 
     getVendors(chatId: string | number): Record<string, string> | null {

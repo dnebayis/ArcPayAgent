@@ -99,7 +99,7 @@ export class CircleClient {
     }
 
     async getWallet(walletId: string): Promise<{ walletId: string, address: string }> {
-        const data = await this.request("GET", `/developer/wallets/${walletId}`);
+        const data = await this.request("GET", `/wallets/${walletId}`);
         return {
             walletId: data.wallet.id,
             address: data.wallet.address
@@ -170,10 +170,10 @@ export class CircleClient {
     }
 
     async getWalletBalance(walletId: string): Promise<any> {
-        return await this.request("GET", `/developer/wallets/${walletId}/balances`);
+        return await this.request("GET", `/wallets/${walletId}/balances`);
     }
 
     async getWalletTransactions(walletId: string): Promise<any> {
-        return await this.request("GET", `/developer/transactions?walletIds=${walletId}&pageSize=50`);
+        return await this.request("GET", `/transactions?walletIds=${walletId}&pageSize=50`);
     }
 }

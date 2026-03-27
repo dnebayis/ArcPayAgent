@@ -18,6 +18,40 @@ describe("VendorStore", () => {
         expect(store.getVendor(1, "Jack")).toBe("0xabc123");
     });
 
+    it("should resolve vendor names across punctuation differences", () => {
+        const store = new VendorStore();
+
+        store.saveVendor(1, "Anthropic, PBC", "0xabc123");
+        expect(store.getVendor(1, "Anthropic PBC")).toBe("0xabc123");
+    });
+
+    it("should resolve vendor names across spacing differences", () => {
+        const store = new VendorStore();
+
+        store.saveVendor(1, "Office Rent", "0xabc123");
+        expect(store.getVendor(1, "OfficeRent")).toBe("0xabc123");
+    });
+
+    it("should return canonical vendor match details", () => {
+        const store = new VendorStore();
+
+        store.saveVendor(1, "Anthropic, PBC", "0xabc123");
+        const match = store.resolveVendor(1, "Anthropic PBC");
+
+        expect(match).not.toBeNull();
+        expect(match!.name).toBe("anthropic pbc");
+        expect(match!.data.address).toBe("0xabc123");
+    });
+
+    it("should preserve display casing for vendor names", () => {
+        const store = new VendorStore();
+
+        store.saveVendor(1, "Anthropic, PBC", "0xabc123");
+
+        expect(store.getVendorDisplayName(1, "anthropic pbc")).toBe("Anthropic, PBC");
+        expect(store.getVendorDisplayNameByAddress(1, "0xabc123")).toBe("Anthropic, PBC");
+    });
+
     it("should return null for non-existent vendors", () => {
         const store = new VendorStore();
         expect(store.getVendor("1234", "nobody")).toBeNull();

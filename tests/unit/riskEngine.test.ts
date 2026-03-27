@@ -246,5 +246,59 @@ describe("RiskEngine", () => {
 
             expect(msg).toBe("");
         });
+
+        it("should explain flags in natural language", () => {
+            const explanations = RiskEngine.explainFlags({
+                riskScore: 0.5,
+                flags: ["duplicate_invoice", "vendor_mismatch"],
+                level: "REVIEW"
+            });
+
+            expect(explanations[0]).toContain("previously seen invoice");
+            expect(explanations[1]).toContain("not saved in your address book");
+        });
+
+        it("should build a conversational review summary", () => {
+            const msg = RiskEngine.formatConversationalSummary("Anthropic, PBC", {
+                riskScore: 0.5,
+                flags: ["duplicate_invoice", "vendor_mismatch"],
+                level: "REVIEW"
+            }, {
+                canPreparePayment: false,
+                settlementAmount: "10.00",
+                settlementCurrency: "USDC"
+            });
+
+            expect(msg).toContain("needs review");
+            expect(msg).toContain("previously seen invoice");
+            expect(msg).toContain("Save the vendor first");
+        });
+
+        it("should build a short recommendation for review cases", () => {
+            const msg = RiskEngine.formatRecommendation({
+                riskScore: 0.5,
+                flags: ["duplicate_invoice", "vendor_mismatch"],
+                level: "REVIEW"
+            }, {
+                canPreparePayment: false
+            });
+
+            expect(msg).toContain("save the vendor first");
+        });
+
+        it("should build a conversational safe summary", () => {
+            const msg = RiskEngine.formatConversationalSummary("Anthropic, PBC", {
+                riskScore: 0,
+                flags: [],
+                level: "SAFE"
+            }, {
+                canPreparePayment: true,
+                settlementAmount: "10.00",
+                settlementCurrency: "USDC"
+            });
+
+            expect(msg).toContain("looks safe right now");
+            expect(msg).toContain("10.00 USDC");
+        });
     });
 });

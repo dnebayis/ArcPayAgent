@@ -8,6 +8,7 @@ ArcPay Agent is a long-running Node.js service with:
 - a lightweight HTTP health server
 - local or PostgreSQL-backed persistence
 - periodic scheduler and reconciliation timers
+- LLM-orchestrated conversation runtime
 
 The safest deployment model is a single instance.
 
@@ -55,6 +56,14 @@ PAYMENT_HISTORY_CHUNK=8000
 PAYMENT_HISTORY_WINDOWS=2
 CIRCLE_TX_POLL_ATTEMPTS=15
 CIRCLE_TX_POLL_INTERVAL_MS=2000
+ARC_AGENT_METADATA_URI=
+ARC_AGENT_ID=
+ARC_AGENT_OWNER_WALLET_ID=
+ARC_AGENT_VALIDATOR_WALLET_ID=
+ARC_AGENT_WALLET_SET_NAME=
+ERC8004_IDENTITY_REGISTRY_ADDRESS=
+ERC8004_REPUTATION_REGISTRY_ADDRESS=
+ERC8004_VALIDATION_REGISTRY_ADDRESS=
 ```
 
 ## Build and Start
@@ -142,27 +151,34 @@ Avoid:
 - multiple app instances on SQLite
 - shared write workloads without a shared database
 
-## Render Example
+## Northflank Deployment
 
-Suggested settings:
+Northflank is the recommended hosting platform.
+
+Suggested service settings:
 
 ```text
 Build Command: npm ci && npm run build
 Start Command: npm start
 ```
 
-Health check suggestions:
+Health check settings:
 
 ```text
-Health: /health
-Readiness: /ready
+Health path:    /health
+Readiness path: /ready
+Port:           3000 (or match PORT env)
 ```
 
-Notes:
+Persistence notes:
 
-- if using SQLite, use persistent disk
-- if redeploy durability matters, prefer PostgreSQL
-- Telegram polling means one active instance is the safe default
+- if using SQLite, attach a persistent volume and set its mount path to the `data/` directory
+- if redeploy durability matters, prefer PostgreSQL with a Northflank addon or external DB
+
+Environment variables:
+
+- add all required env vars in the Northflank service environment settings
+- use Northflank secrets for `TELEGRAM_TOKEN`, `CIRCLE_API_KEY`, `CIRCLE_ENTITY_SECRET`, and `LLM_KEY_SECRET`
 
 ## Arc-Specific Operational Notes
 
@@ -187,8 +203,9 @@ At startup the app:
 2. initializes persistence
 3. probes RPC connectivity
 4. creates Telegram bot, Circle client, stores, and engines
-5. starts scheduler and reconciliation intervals
-6. optionally starts HTTP server
+5. creates orchestrator and tool dispatcher
+6. starts scheduler and reconciliation intervals
+7. optionally starts HTTP server
 
 If configuration is invalid, startup should fail for payment-critical values.
 
@@ -198,6 +215,7 @@ If configuration is invalid, startup should fail for payment-critical values.
 - scheduler notifications depend on the bot being reachable and running
 - wallet intelligence uses external explorer-style data paths
 - payment history from router scans is not a full indexer
+- running more than one bot process against the same Telegram token is not supported
 
 ## Deployment Checklist
 
@@ -211,6 +229,7 @@ If configuration is invalid, startup should fail for payment-critical values.
 8. Send a small test payment
 9. Test a payment request
 10. Test a scheduled payment reminder
+11. Test an invoice upload + review + payment + post-pay cleanup sequence
 
 ## Rollback Advice
 

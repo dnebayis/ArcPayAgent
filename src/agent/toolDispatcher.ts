@@ -1,0 +1,382 @@
+import TelegramBot from "node-telegram-bot-api";
+import { ethers } from "ethers";
+import { PaymentEngine } from "../engines/paymentEngine";
+import { AnalyticsEngine } from "../engines/analyticsEngine";
+import { PaymentRequestEngine } from "../engines/paymentRequestEngine";
+import { VendorStore } from "../storage/vendorStore";
+import { WalletStore } from "../storage/walletStore";
+import { ScheduleStore } from "../storage/schedules";
+import { UserPreferencesStore } from "../storage/userPreferences";
+import { InternalToolset } from "./internalTools";
+import { ConversationMemory } from "./conversationMemory";
+import { USDC } from "../blockchain/usdc";
+import { parseScheduleDate } from "../utils/dateParser";
+import { formatUserDateTime } from "../utils/userDateTime";
+import { escapeTelegramMarkdown } from "../utils/telegramMarkdown";
+import { ParsedIntent } from "../core/orchestrator";
+
+interface ToolDispatcherDeps {
+    bot: TelegramBot;
+    paymentEngine: PaymentEngine;
+    analyticsEngine: AnalyticsEngine;
+    paymentRequestEngine: PaymentRequestEngine;
+    vendorStore: VendorStore;
+    walletStore: WalletStore;
+    scheduleStore: ScheduleStore;
+    userPreferencesStore: UserPreferencesStore;
+    internalTools: InternalToolset;
+    memory: ConversationMemory;
+    usdc: USDC;
+}
+
+export class ToolDispatcher {
+    constructor(private deps: ToolDispatcherDeps) { }
+
+    private async reply(chatId: number, msg: string, opts?: object): Promise<void> {
+        await this.deps.bot.sendMessage(chatId, msg, opts as any).catch(() =>
+            this.deps.bot.sendMessage(chatId, msg)
+        );
+        this.deps.memory.addBotMessage(chatId, msg);
+    }
+
+    async execute(chatId: number, intent: ParsedIntent): Promise<void> {
+        const { paymentEngine, analyticsEngine, paymentRequestEngine,
+            vendorStore, walletStore, scheduleStore,
+            internalTools, memory } = this.deps;
+
+        const action = intent.action || "chat";
+
+        switch (action) {
+            // ── Payment ────────────────────────────────────────────────
+            case "create_payment": {
+                const beneficiary = intent.beneficiary ? String(intent.beneficiary) : null;
+                const amount = intent.amount != null ? String(intent.amount) : null;
+                if (!beneficiary || !amount) {
+                    if (!intent.message) {
+                        await this.reply(chatId, "I need a recipient and amount to prepare a payment. Example: `send 5 usdc to aws`", { parse_mode: "Markdown" });
+                    }
+                    return;
+                }
+                await paymentEngine.preparePayment(chatId, beneficiary, amount, intent.memo ? String(intent.memo) : "ArcPay", { origin: "byok" });
+                if (beneficiary) memory.setLastPayment(chatId, beneficiary, String(amount));
+                break;
+            }
+
+            // ── Schedule ───────────────────────────────────────────────
+            case "schedule_payment": {
+                const beneficiary = intent.beneficiary ? String(intent.beneficiary) : null;
+                const amount = intent.amount != null ? Number(intent.amount) : null;
+                if (!beneficiary || !amount) {
+                    if (!intent.message) {
+                        await this.reply(chatId, "I need a recipient, amount, and time to schedule a payment. Example: `schedule payment 10 usdc to aws tomorrow`", { parse_mode: "Markdown" });
+                    }
+                    return;
+                }
+                await this.createSchedule(chatId, beneficiary, amount, intent);
+                break;
+            }
+
+            case "cancel_schedule": {
+                const scheduleId = intent.name ? String(intent.name) : null;
+                if (!scheduleId) {
+                    const schedules = scheduleStore.getSchedules(chatId);
+                    if (!schedules.length) {
+                        await this.reply(chatId, "No active schedules found.");
+                        return;
+                    }
+                    const list = schedules.map(s =>
+                        `• \`${s.id}\` — ${s.amount} USDC to ${escapeTelegramMarkdown(s.vendor)} (${s.frequency})`
+                    ).join("\n");
+                    await this.reply(chatId, `Which schedule would you like to cancel?\n\n${list}\n\nSay \`cancel schedule <id>\` to cancel one.`, { parse_mode: "Markdown" });
+                    return;
+                }
+                const cancelled = scheduleStore.cancelSchedule(chatId, scheduleId);
+                if (cancelled) {
+                    const remaining = scheduleStore.getSchedules(chatId).length;
+                    const remainingNote = remaining === 0
+                        ? " No more active schedules."
+                        : ` ${remaining} schedule${remaining === 1 ? "" : "s"} still active.`;
+                    await this.reply(chatId, `❌ Schedule \`${scheduleId}\` cancelled.${remainingNote}`, { parse_mode: "Markdown" });
+                } else {
+                    await this.reply(chatId, `Schedule \`${scheduleId}\` not found.`, { parse_mode: "Markdown" });
+                }
+                break;
+            }
+
+            case "cancel_all_schedules": {
+                const schedules = scheduleStore.getSchedules(chatId);
+                if (!schedules.length) {
+                    await this.reply(chatId, "No active schedules to cancel.");
+                    return;
+                }
+                for (const s of schedules) {
+                    scheduleStore.cancelSchedule(chatId, s.id);
+                }
+                await this.reply(chatId, `❌ All ${schedules.length} schedule${schedules.length === 1 ? "" : "s"} cancelled.`);
+                break;
+            }
+
+            case "list_schedules": {
+                const result = await internalTools.execute(chatId, "schedule_summary");
+                await this.reply(chatId, result.summary, { parse_mode: "Markdown" });
+                break;
+            }
+
+            // ── Vendors ────────────────────────────────────────────────
+            case "save_vendor": {
+                const name = intent.name ? String(intent.name) : null;
+                const address = intent.address ? String(intent.address) : null;
+                if (!name || !address) {
+                    if (!intent.message) {
+                        await this.reply(chatId, "I need a vendor name and address. Example: `save vendor aws 0x...`", { parse_mode: "Markdown" });
+                    }
+                    return;
+                }
+                if (!ethers.isAddress(address)) {
+                    await this.reply(chatId, "That doesn't look like a valid EVM address. Please provide a full `0x...` address.", { parse_mode: "Markdown" });
+                    return;
+                }
+                vendorStore.saveVendor(chatId, name, address);
+                memory.setLastVendor(chatId, name, address);
+                await this.reply(chatId, `✅ Vendor **${escapeTelegramMarkdown(name)}** saved with address \`${address}\`.`, { parse_mode: "Markdown" });
+                break;
+            }
+
+            case "list_vendors": {
+                const vendors = vendorStore.getVendorsWithStats(chatId);
+                if (!vendors || Object.keys(vendors).length === 0) {
+                    await this.reply(chatId, "No vendors saved yet. Use `save vendor <name> <0x...>` to add one.", { parse_mode: "Markdown" });
+                    return;
+                }
+                let msg = "📋 **Saved Vendors**\n\n";
+                for (const [name, data] of Object.entries(vendors)) {
+                    const display = data.displayName || name;
+                    const stats = data.totalPaid > 0 ? ` — ${data.totalPaid} USDC paid` : "";
+                    msg += `• **${escapeTelegramMarkdown(display)}** \`${data.address.slice(0, 10)}...\`${stats}\n`;
+                }
+                await this.reply(chatId, msg, { parse_mode: "Markdown" });
+                break;
+            }
+
+            case "remove_vendor": {
+                const name = intent.name ? String(intent.name) : null;
+                if (!name) {
+                    await this.reply(chatId, "Which vendor would you like to remove?");
+                    return;
+                }
+                const removed = vendorStore.removeVendor(chatId, name);
+                await this.reply(chatId, removed
+                    ? `✅ Vendor **${escapeTelegramMarkdown(name)}** removed.`
+                    : `Vendor **${escapeTelegramMarkdown(name)}** not found.`,
+                    { parse_mode: "Markdown" }
+                );
+                break;
+            }
+
+            case "remove_all_vendors": {
+                const vendors = vendorStore.getVendors(chatId);
+                if (!vendors) {
+                    await this.reply(chatId, "No vendors to remove.");
+                    return;
+                }
+                for (const name of Object.keys(vendors)) {
+                    vendorStore.removeVendor(chatId, name);
+                }
+                await this.reply(chatId, "✅ All vendors removed.");
+                break;
+            }
+
+            case "vendor_detail": {
+                const name = intent.name ? String(intent.name) : null;
+                const result = await internalTools.execute(chatId, "vendor_lookup", name ? { name } : {});
+                await this.reply(chatId, result.summary, { parse_mode: "Markdown" });
+                if (name) memory.setLastVendor(chatId, name);
+                break;
+            }
+
+            case "top_vendors": {
+                const top = vendorStore.getTopVendors(chatId, 10);
+                if (!top.length) {
+                    await this.reply(chatId, "No vendor spending data yet.");
+                    return;
+                }
+                let msg = "🏆 **Top Vendors by Spending**\n\n";
+                top.forEach((v, i) => {
+                    const display = v.data.displayName || v.name;
+                    msg += `${i + 1}. **${escapeTelegramMarkdown(display)}** — ${v.data.totalPaid} USDC\n`;
+                });
+                await this.reply(chatId, msg, { parse_mode: "Markdown" });
+                break;
+            }
+
+            // ── Wallet ─────────────────────────────────────────────────
+            case "create_wallet": {
+                if (walletStore.hasWallet(chatId)) {
+                    const address = walletStore.getWalletAddress(chatId);
+                    await this.reply(chatId, `You already have a wallet: \`${address}\``, { parse_mode: "Markdown" });
+                    return;
+                }
+                try {
+                    await this.reply(chatId, "Creating your wallet on Arc Testnet...");
+                    const address = await walletStore.createWallet(chatId);
+                    await this.reply(chatId,
+                        `✅ **Wallet Created**\n\nAddress: \`${address}\`\n\nYou can now receive and send USDC on Arc Testnet.`,
+                        { parse_mode: "Markdown" }
+                    );
+                } catch (error: any) {
+                    await this.reply(chatId, `❌ Failed to create wallet: ${error.message}`);
+                }
+                break;
+            }
+
+            case "show_wallet":
+            case "export_wallet": {
+                const result = await internalTools.execute(chatId, "wallet_summary");
+                await this.reply(chatId, result.summary, { parse_mode: "Markdown" });
+                break;
+            }
+
+            case "wallet_intelligence": {
+                const result = await internalTools.execute(chatId, "wallet_summary");
+                await this.reply(chatId, result.summary, { parse_mode: "Markdown" });
+                break;
+            }
+
+            // ── Analytics ──────────────────────────────────────────────
+            case "report": {
+                await analyticsEngine.showReport(chatId, "month");
+                break;
+            }
+
+            case "spending_by_vendor": {
+                await analyticsEngine.showVendorBreakdown(chatId, "all");
+                break;
+            }
+
+            case "payment_history": {
+                await analyticsEngine.showHistory(chatId, 10);
+                break;
+            }
+
+            case "show_recent_payments": {
+                const result = await internalTools.execute(chatId, "recent_payments", { limit: 5 });
+                await this.reply(chatId, result.summary, { parse_mode: "Markdown" });
+                break;
+            }
+
+            case "show_pending_payments": {
+                const result = await internalTools.execute(chatId, "pending_payment_status");
+                await this.reply(chatId, result.summary, { parse_mode: "Markdown" });
+                break;
+            }
+
+            case "monthly_spending": {
+                await analyticsEngine.showMonthlyBreakdown(chatId);
+                break;
+            }
+
+            case "account_summary": {
+                const result = await internalTools.execute(chatId, "account_snapshot");
+                await this.reply(chatId, result.summary, { parse_mode: "Markdown" });
+                break;
+            }
+
+            case "status": {
+                const result = await internalTools.execute(chatId, "agent_operations_overview");
+                await this.reply(chatId, result.summary, { parse_mode: "Markdown" });
+                break;
+            }
+
+            // ── Payment requests ───────────────────────────────────────
+            case "create_payment_request": {
+                const amount = intent.amount != null ? Number(intent.amount) : null;
+                if (!amount || amount <= 0) {
+                    await this.reply(chatId, "How much USDC would you like to request?");
+                    return;
+                }
+                await paymentRequestEngine.createRequest(chatId, amount);
+                break;
+            }
+
+            // ── Agent identity ─────────────────────────────────────────
+            case "agent_status": {
+                const result = await internalTools.execute(chatId, "agent_registration_status");
+                await this.reply(chatId, result.summary, { parse_mode: "Markdown" });
+                break;
+            }
+
+            case "agent_identity": {
+                const result = await internalTools.execute(chatId, "agent_identity");
+                await this.reply(chatId, result.summary, { parse_mode: "Markdown" });
+                break;
+            }
+
+            case "agent_validation_status": {
+                const result = await internalTools.execute(chatId, "agent_validation_status");
+                await this.reply(chatId, result.summary, { parse_mode: "Markdown" });
+                break;
+            }
+
+            // ── Invoice ────────────────────────────────────────────────
+            case "analyze_invoice": {
+                if (!intent.message) {
+                    await this.reply(chatId, "Please send me the invoice as a PDF or photo and I'll analyze it for you.");
+                }
+                break;
+            }
+
+            // ── Chat (LLM produced message only, no action needed) ─────
+            case "chat": {
+                // Message already sent by orchestrator
+                break;
+            }
+
+            default: {
+                console.warn(`[ToolDispatcher] Unknown action: ${action}`);
+                // No additional message - orchestrator already sent intent.message
+                break;
+            }
+        }
+    }
+
+    private async createSchedule(
+        chatId: number,
+        beneficiary: string,
+        amount: number,
+        intent: ParsedIntent
+    ): Promise<void> {
+        const { vendorStore, scheduleStore, userPreferencesStore, memory } = this.deps;
+
+        if (ethers.isAddress(beneficiary) && !ethers.isAddress(beneficiary)) {
+            await this.reply(chatId, "That wallet address looks invalid. Please provide a full valid `0x...` address.", { parse_mode: "Markdown" });
+            return;
+        }
+
+        const isDirectAddress = ethers.isAddress(beneficiary);
+        const scheduleAddress = isDirectAddress ? beneficiary : vendorStore.getVendor(chatId, beneficiary);
+
+        if (!scheduleAddress) {
+            await this.reply(chatId, `❌ Vendor **${escapeTelegramMarkdown(beneficiary)}** not found. Save it first with \`save vendor ${beneficiary} 0x...\`, or use a full wallet address.`, { parse_mode: "Markdown" });
+            return;
+        }
+
+        const timeInput = intent.schedule_time ? String(intent.schedule_time) : "";
+        let nextExecution = parseScheduleDate(timeInput);
+
+        if (!nextExecution) {
+            nextExecution = parseScheduleDate("tomorrow")!;
+        }
+
+        const frequency = (["once", "weekly", "monthly"].includes(String(intent.frequency || ""))
+            ? intent.frequency as "once" | "weekly" | "monthly"
+            : "once");
+
+        const schedule = scheduleStore.createSchedule(chatId, beneficiary, scheduleAddress, amount, nextExecution, frequency);
+        memory.setLastSchedule(chatId, schedule.vendor, schedule.amount.toString(), schedule.nextExecution, schedule.id);
+
+        const preferences = userPreferencesStore.getPreferences(chatId);
+
+        const msg = `✅ **Scheduled payment created**\n\nAmount: ${schedule.amount} USDC\nRecipient: **${escapeTelegramMarkdown(schedule.vendor)}**\nExecution: ${formatUserDateTime(schedule.nextExecution, preferences)}\nFrequency: ${schedule.frequency}\nID: \`${schedule.id}\``;
+        await this.reply(chatId, msg, { parse_mode: "Markdown" });
+    }
+}

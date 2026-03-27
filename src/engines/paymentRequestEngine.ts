@@ -7,7 +7,8 @@ export class PaymentRequestEngine {
         private bot: TelegramBot,
         private requestStore: PaymentRequestStore,
         private walletStore: WalletStore,
-        private botUsername: string
+        private botUsername: string,
+        private onMessage?: (chatId: number, msg: string) => void
     ) { }
 
     /**
@@ -26,11 +27,9 @@ export class PaymentRequestEngine {
         const username = this.botUsername.replace(/^@/, "");
         const link = `https://t.me/${username}?start=req_${requestId}`;
 
-        this.bot.sendMessage(
-            chatId,
-            `✅ Payment request created.\n\nAmount: **${amount} ${token}**\n\nShare this link:\n\`${link}\``,
-            { parse_mode: "Markdown" }
-        );
+        const msg = `✅ Payment request created.\n\nAmount: **${amount} ${token}**\n\nShare this link:\n\`${link}\``;
+        this.bot.sendMessage(chatId, msg, { parse_mode: "Markdown" });
+        this.onMessage?.(chatId, msg);
     }
 
     /**

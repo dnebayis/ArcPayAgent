@@ -2,3 +2,10 @@ node_modules/
 dist/
 data/
 .env
+.telegram-live/
+.telegram-audit/
+.DS_Store
+.claude/
+.cursor/
+.vscode/
+pnpm-lock.yaml

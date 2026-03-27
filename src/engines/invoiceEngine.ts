@@ -1,10 +1,11 @@
 import TelegramBot from "node-telegram-bot-api";
 import { ethers } from "ethers";
+import { randomUUID } from "node:crypto";
 import { InvoiceStore } from "../storage/invoiceStore";
 import { VendorStore } from "../storage/vendorStore";
 import { RiskEngine, RiskResult } from "./riskEngine";
-import { MemoryStore } from "../ai/memoryStore";
 import { FxRateService } from "../services/fxRateService";
+import { ConversationMemory } from "../agent/conversationMemory";
 
 export interface ExtractedInvoice {
     vendor: string | null;
@@ -18,7 +19,52 @@ export interface ExtractedInvoice {
     date: string | null;
 }
 
+export type InvoiceSessionStatus =
+    | "uploaded"
+    | "analyzed"
+    | "review_required"
+    | "ready_to_prepare"
+    | "awaiting_override"
+    | "awaiting_payment_confirmation"
+    | "paid"
+    | "cancelled"
+    | "closed";
+
+export interface InvoiceSessionRiskState {
+    level: RiskResult["level"];
+    riskScore: number;
+    flags: string[];
+    explanations: string[];
+    canPreparePayment: boolean;
+    requiresOverride: boolean;
+    blocked: boolean;
+}
+
+export interface InvoiceSessionResolution {
+    displayVendor: string;
+    matchedVendorName: string | null;
+    resolvedBeneficiary: string | null;
+    canPreparePayment: boolean;
+    requiresOverride: boolean;
+}
+
+export interface InvoiceSessionRecord {
+    id: string;
+    chatId: number;
+    status: InvoiceSessionStatus;
+    invoice: ExtractedInvoice;
+    risk: InvoiceSessionRiskState | null;
+    rawRisk: RiskResult | null;
+    resolution: InvoiceSessionResolution;
+    sourceMessageId: number | null;
+    sourceMimeType: string | null;
+    openedAt: number;
+    updatedAt: number;
+    expiresAt: number;
+}
+
 export class InvoiceEngine {
+    private static readonly SESSION_TTL_MS = 30 * 60 * 1000;
     private riskEngine: RiskEngine;
     private fxRateService: FxRateService;
 
@@ -26,7 +72,8 @@ export class InvoiceEngine {
         private bot: TelegramBot,
         private invoiceStore: InvoiceStore,
         private vendorStore: VendorStore,
-        private memoryStore?: MemoryStore
+        private conversationMemory?: ConversationMemory,
+        private onMessage?: (chatId: number, msg: string) => void
     ) {
         this.riskEngine = new RiskEngine(invoiceStore, vendorStore);
         this.fxRateService = new FxRateService();
@@ -114,26 +161,34 @@ export class InvoiceEngine {
         return lines;
     }
 
-    private resolveInvoiceVendor(chatId: number, extracted: ExtractedInvoice): { label: string; resolvedAddress: string | null; canPreparePayment: boolean } {
+    private resolveInvoiceVendor(chatId: number, extracted: ExtractedInvoice): InvoiceSessionResolution {
         const vendorLabel = extracted.vendor || "Unknown Vendor";
 
         if (ethers.isAddress(vendorLabel)) {
             return {
-                label: vendorLabel,
-                resolvedAddress: vendorLabel,
-                canPreparePayment: true
+                displayVendor: vendorLabel,
+                matchedVendorName: null,
+                resolvedBeneficiary: vendorLabel,
+                canPreparePayment: true,
+                requiresOverride: false
             };
         }
 
-        const resolvedAddress = extracted.vendor ? this.vendorStore.getVendor(chatId, extracted.vendor) : null;
+        const resolved = extracted.vendor ? this.vendorStore.resolveVendor(chatId, extracted.vendor) : null;
         return {
-            label: vendorLabel,
-            resolvedAddress: resolvedAddress || null,
-            canPreparePayment: Boolean(resolvedAddress)
+            displayVendor: vendorLabel,
+            matchedVendorName: resolved?.name || null,
+            resolvedBeneficiary: resolved?.data.address || null,
+            canPreparePayment: Boolean(resolved?.data.address),
+            requiresOverride: false
         };
     }
 
-    private buildNextStepLines(chatId: number, extracted: ExtractedInvoice, risk: RiskResult | null, canPreparePayment: boolean): string[] {
+    private buildNextStepLines(
+        extracted: ExtractedInvoice,
+        risk: InvoiceSessionRiskState | null,
+        resolution: InvoiceSessionResolution
+    ): string[] {
         const settlementAmount = this.getSettlementAmount(extracted);
         const settlementCurrency = this.getSettlementCurrency(extracted) || "USDC";
         const vendorLabel = extracted.vendor || "this vendor";
@@ -141,41 +196,62 @@ export class InvoiceEngine {
         if (!this.getSettlementAmount(extracted)) {
             return [
                 "Next step:",
-                "• Retry later when FX conversion is available, or send the payment manually."
+                "• I still need a clean settlement amount before I can line this payment up automatically.",
+                "• You can retry later when FX conversion is available, or send the payment manually."
             ];
         }
 
-        if (!canPreparePayment && extracted.vendor) {
+        if (!resolution.canPreparePayment && extracted.vendor) {
             return [
                 "Next step:",
-                `• Save this vendor first: \`save vendor "${extracted.vendor}" 0x...\``,
-                `• Then say \`pay this invoice\` to continue with ${settlementAmount} ${settlementCurrency}.`
+                `• If you want to pay it here, save "${extracted.vendor}" with a wallet address first.`,
+                `• Once that vendor is saved, I can use this invoice to line up ${settlementAmount} ${settlementCurrency}.`
             ];
         }
 
         if (risk?.level === "REVIEW") {
             return [
                 "Next step:",
-                "• Review the flags below.",
-                `• If everything looks right, say \`pay this invoice\` or tap Prepare Payment to send ${settlementAmount} ${settlementCurrency} to ${vendorLabel}.`
+                "• Review the flags below and ask me what looks off if you want details.",
+                "• If you still want to continue after reviewing them, tell me to go ahead anyway.",
+                `• Once you explicitly override, I'll line up ${settlementAmount} ${settlementCurrency} to ${vendorLabel}.`
             ];
         }
 
         if (risk?.level === "HIGH_RISK") {
             return [
                 "Next step:",
-                "• Review the risk flags carefully.",
-                `• Only continue if you trust this invoice and want to send ${settlementAmount} ${settlementCurrency}.`
+                "• Review the risk flags carefully and ask me what triggered them if you want more detail.",
+                "• This invoice is blocked from payment preparation until you upload a safer invoice or resolve the flagged issue."
             ];
         }
 
         return [
             "Next step:",
-            `• Say \`pay this invoice\` or tap Prepare Payment to send ${settlementAmount} ${settlementCurrency} to ${vendorLabel}.`
+            `• If you want, I can line up ${settlementAmount} ${settlementCurrency} to ${vendorLabel} now.`,
+            "• You can also ask what I checked, confirm the amount, or leave it for later."
         ];
     }
 
-    private buildReadinessLine(extracted: ExtractedInvoice, risk: RiskResult | null, canPreparePayment: boolean): string {
+    private buildRiskExplanationLines(extracted: ExtractedInvoice, risk: InvoiceSessionRiskState | null, canPreparePayment: boolean): string[] {
+        if (!risk || risk.flags.length === 0) {
+            return [];
+        }
+
+        return [
+            "",
+            "Why this needs attention:",
+            ...risk.explanations.map((line) => `• ${line}`),
+            "",
+            `Recommendation: ${RiskEngine.formatRecommendation({
+                level: risk.level,
+                flags: risk.flags,
+                riskScore: risk.riskScore
+            } as RiskResult, { canPreparePayment })}`
+        ];
+    }
+
+    private buildReadinessLine(extracted: ExtractedInvoice, risk: InvoiceSessionRiskState | null, canPreparePayment: boolean): string {
         if (!this.getSettlementAmount(extracted)) {
             return "Payment readiness: **Waiting for FX conversion**";
         }
@@ -191,11 +267,227 @@ export class InvoiceEngine {
         return "Payment readiness: **Ready to pay**";
     }
 
+    private getSessionKey(chatId: number): string {
+        return chatId.toString();
+    }
+
+    private buildInvoiceSessionRiskState(risk: RiskResult | null, resolution: InvoiceSessionResolution): InvoiceSessionRiskState | null {
+        if (!risk) {
+            return null;
+        }
+
+        return {
+            level: risk.level,
+            riskScore: risk.riskScore,
+            flags: risk.flags,
+            explanations: RiskEngine.explainFlags(risk),
+            canPreparePayment: resolution.canPreparePayment && risk.level === "SAFE",
+            requiresOverride: resolution.canPreparePayment && risk.level === "REVIEW",
+            blocked: risk.level === "HIGH_RISK"
+        };
+    }
+
+    private deriveSessionStatus(resolution: InvoiceSessionResolution, risk: InvoiceSessionRiskState | null, extracted: ExtractedInvoice): InvoiceSessionStatus {
+        if (!this.getSettlementAmount(extracted) || !resolution.canPreparePayment) {
+            return "analyzed";
+        }
+
+        if (risk?.level === "HIGH_RISK" || risk?.level === "REVIEW") {
+            return "review_required";
+        }
+
+        return "ready_to_prepare";
+    }
+
+    private upsertSession(
+        chatId: number,
+        extracted: ExtractedInvoice,
+        rawRisk: RiskResult | null,
+        metadata?: { sourceMessageId?: number | null; sourceMimeType?: string | null }
+    ): InvoiceSessionRecord {
+        const now = Date.now();
+        const resolution = this.resolveInvoiceVendor(chatId, extracted);
+        const risk = this.buildInvoiceSessionRiskState(rawRisk, resolution);
+        const session: InvoiceSessionRecord = {
+            id: `${chatId}-${randomUUID()}`,
+            chatId,
+            status: this.deriveSessionStatus(resolution, risk, extracted),
+            invoice: extracted,
+            risk,
+            rawRisk,
+            resolution,
+            sourceMessageId: metadata?.sourceMessageId ?? null,
+            sourceMimeType: metadata?.sourceMimeType ?? null,
+            openedAt: now,
+            updatedAt: now,
+            expiresAt: now + InvoiceEngine.SESSION_TTL_MS
+        };
+
+        this._activeInvoiceSessions[this.getSessionKey(chatId)] = session;
+        if (this.conversationMemory && (extracted.amount || extracted.vendor)) {
+            const riskLevelMap: Record<string, "safe" | "review" | "high_risk"> = {
+                "SAFE": "safe",
+                "REVIEW": "review",
+                "HIGH_RISK": "high_risk"
+            };
+            this.conversationMemory.setLastInvoice(chatId, {
+                vendor: extracted.vendor,
+                amount: extracted.amount,
+                currency: extracted.currency,
+                detectedAmount: extracted.detectedAmount,
+                detectedCurrency: extracted.detectedCurrency,
+                settlementAmount: extracted.settlementAmount,
+                settlementCurrency: extracted.settlementCurrency,
+                invoiceNumber: extracted.invoiceNumber,
+                riskLevel: rawRisk ? riskLevelMap[rawRisk.level] : undefined,
+                riskFlags: rawRisk?.flags
+            });
+        }
+        return session;
+    }
+
+    private getInvoiceReplyMarkup(session: InvoiceSessionRecord): TelegramBot.SendMessageOptions["reply_markup"] | undefined {
+        if (session.status !== "ready_to_prepare" || !session.resolution.canPreparePayment) {
+            return undefined;
+        }
+
+        return {
+            inline_keyboard: [[
+                { text: "Prepare Payment", callback_data: `invpay_${session.chatId}` },
+                { text: "Cancel", callback_data: `invcancel_${session.chatId}` }
+            ]]
+        };
+    }
+
+    private buildSessionSummaryMessage(session: InvoiceSessionRecord): string {
+        const { invoice, resolution, risk } = session;
+        let message = "📄 Invoice summary\n\n";
+        message += `Vendor: **${resolution.displayVendor}**\n`;
+        if (resolution.matchedVendorName && !this.vendorNamesEquivalent(resolution.matchedVendorName, resolution.displayVendor)) {
+            message += `Matched saved vendor: **${resolution.matchedVendorName}**\n`;
+        }
+        if (resolution.resolvedBeneficiary) {
+            message += `Resolved address: \`${resolution.resolvedBeneficiary}\`\n`;
+        }
+        message += `${this.buildInvoiceAmountLines(invoice).join("\n")}\n`;
+        message += `${this.buildReadinessLine(invoice, risk, resolution.canPreparePayment)}\n`;
+        if (invoice.invoiceNumber) message += `Invoice #: ${invoice.invoiceNumber}\n`;
+        if (invoice.date) message += `Date: ${invoice.date}\n`;
+
+        if (!this.getSettlementAmount(invoice)) {
+            message += "\n⚠️ FX conversion is unavailable right now, so I won't prepare this payment automatically.\n\n";
+            message += this.buildNextStepLines(invoice, risk, resolution).join("\n");
+            return message;
+        }
+
+        if (risk?.level === "HIGH_RISK" || risk?.level === "REVIEW") {
+            message += RiskEngine.formatRiskMessage({
+                level: risk.level,
+                flags: risk.flags,
+                riskScore: risk.riskScore
+            } as RiskResult);
+            const explanationLines = this.buildRiskExplanationLines(invoice, risk, resolution.canPreparePayment);
+            if (explanationLines.length) {
+                message += `\n${explanationLines.join("\n")}`;
+            }
+            message += "\n\n";
+            message += this.buildNextStepLines(invoice, risk, resolution).join("\n");
+            return message;
+        }
+
+        message += "\n✅ Risk check passed\n\n";
+        message += "You can ask what I checked, ask for the amount again, tell me to line it up, or leave it for later.\n\n";
+        message += this.buildNextStepLines(invoice, risk, resolution).join("\n");
+        return message;
+    }
+
     private normalizeAmountValue(raw: string): string {
         if (/\d{1,3}\.\d{3}/.test(raw) || /,\d{2}$/.test(raw)) {
             return raw.replace(/\./g, "").replace(",", ".");
         }
         return raw.replace(/,/g, "");
+    }
+
+    private sanitizeInvoiceNumber(value: string | null): string | null {
+        if (!value) {
+            return null;
+        }
+
+        const normalized = value.trim().replace(/[.:]+$/, "");
+        const lowered = normalized.toLowerCase();
+        const blocked = new Set([
+            "invoice",
+            "fatura",
+            "receipt",
+            "bill",
+            "number",
+            "numara",
+            "numarası",
+            "numarasi",
+            "no"
+        ]);
+
+        if (blocked.has(lowered) || normalized.length < 3) {
+            return null;
+        }
+
+        if (!/[0-9]/.test(normalized) && !/[A-Z]/.test(normalized)) {
+            return null;
+        }
+
+        return normalized;
+    }
+
+    private sanitizeVendorCandidate(value: string | null): string | null {
+        if (!value) {
+            return null;
+        }
+
+        const normalized = value
+            .trim()
+            .replace(/^[\s:.-]+/, "")
+            .replace(/[\s:.-]+$/, "")
+            .replace(/\s{2,}/g, " ");
+
+        const lowered = normalized.toLowerCase();
+        const blocked = new Set([
+            "invoice",
+            "fatura",
+            "receipt",
+            "bill",
+            "payment",
+            "customer",
+            "bill to",
+            "billed to",
+            "invoice summary",
+            "payment address",
+            "address",
+            "unknown vendor",
+            "lar",
+            "ler"
+        ]);
+
+        if (!normalized || normalized.length < 3 || blocked.has(lowered)) {
+            return null;
+        }
+
+        if (/^[a-zçğıöşü]+$/i.test(normalized) && /^[a-zçğıöşü]+$/.test(normalized) && normalized.length <= 3) {
+            return null;
+        }
+
+        if (/^[a-zçğıöşü]+$/.test(normalized) && /(lar|ler)$/.test(lowered) && normalized.length <= 5) {
+            return null;
+        }
+
+        return normalized;
+    }
+
+    private vendorNamesEquivalent(a: string | null, b: string | null): boolean {
+        const normalize = (value: string | null): string => (value || "")
+            .toLowerCase()
+            .trim();
+
+        return Boolean(a && b) && normalize(a) === normalize(b);
     }
 
     private inferDefaultCurrency(text: string): string {
@@ -209,11 +501,170 @@ export class InvoiceEngine {
         return "USD";
     }
 
-    private extractAmountCandidate(text: string): { amount: string; currency: string } | null {
-        const lines = text
+    private collectNonEmptyLines(text: string): string[] {
+        return text
             .split(/\r?\n/)
             .map(line => line.trim())
             .filter(Boolean);
+    }
+
+    private normalizeExtractedText(text: string): string {
+        const cleaned = text
+            .replace(/-\r?\n(?=\w)/g, "")
+            .replace(/[ \t]+/g, " ");
+        const rawLines = cleaned.split(/\r?\n/);
+        const merged: string[] = [];
+
+        for (const rawLine of rawLines) {
+            const line = rawLine.trim();
+            if (!line) {
+                continue;
+            }
+
+            const previous = merged[merged.length - 1];
+            const isShortAlphaFragment = /^[A-Za-zÇçĞğİıÖöŞşÜü]{1,3}$/.test(line);
+            const previousLooksWordLike = Boolean(previous) && /[A-Za-zÇçĞğİıÖöŞşÜü]$/.test(previous);
+
+            if (isShortAlphaFragment && previousLooksWordLike && !/[.:]$/.test(previous)) {
+                merged[merged.length - 1] = `${previous}${line}`;
+                continue;
+            }
+
+            merged.push(line);
+        }
+
+        return merged.join("\n");
+    }
+
+    private extractInvoiceNumberCandidate(text: string): string | null {
+        const lines = this.collectNonEmptyLines(text);
+        const candidates: Array<{ value: string; score: number }> = [];
+        const pushCandidate = (raw: string | null | undefined, score: number) => {
+            const sanitized = this.sanitizeInvoiceNumber(raw || null);
+            if (!sanitized) {
+                return;
+            }
+            candidates.push({ value: sanitized, score });
+        };
+
+        const patterns: Array<{ regex: RegExp; score: number }> = [
+            { regex: /invoice\s*(?:#|no\.?|number|num)?\s*:?\s*([A-Z0-9][\w-]{2,30})/i, score: 12 },
+            { regex: /fatura\s*(?:no\.?|numarası|numarasi)?\s*:?\s*([A-Z0-9][\w-]{2,30})/i, score: 12 },
+            { regex: /(?:inv|ref|reference)\s*(?:#|no\.?)?\s*:?\s*([A-Z0-9][\w-]{2,30})/i, score: 10 },
+            { regex: /#\s*([A-Z0-9][\w-]{3,30})/i, score: 6 }
+        ];
+
+        for (const line of lines) {
+            for (const pattern of patterns) {
+                const match = line.match(pattern.regex);
+                if (match) {
+                    pushCandidate(match[1], pattern.score);
+                }
+            }
+        }
+
+        if (candidates.length === 0) {
+            return null;
+        }
+
+        candidates.sort((a, b) => b.score - a.score || b.value.length - a.value.length);
+        return candidates[0].value;
+    }
+
+    private extractDateCandidate(text: string): string | null {
+        const trMonths = "Ocak|Şubat|Mart|Nisan|Mayıs|Haziran|Temmuz|Ağustos|Eylül|Ekim|Kasım|Aralık";
+        const enMonths = "Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec";
+        const lines = this.collectNonEmptyLines(text);
+        const candidates: Array<{ value: string; score: number }> = [];
+        const patterns: Array<{ regex: RegExp; score: number }> = [
+            { regex: new RegExp(`(?:tarih|date\\s*paid|date|issued|created|düzenleme\\s*tarihi|fatura\\s*tarihi|son\\s*ödeme\\s*tarihi)[:\\s]*(\\d{1,2}[\\s.]+(?:${trMonths}|${enMonths})[a-zıüğşçö]*\\s+\\d{4})`, "i"), score: 12 },
+            { regex: new RegExp(`(?:tarih|date\\s*paid|date|issued|created)[:\\s]*((?:${enMonths}|${trMonths})[a-zıüğşçö]*\\s+\\d{1,2},?\\s+\\d{4})`, "i"), score: 12 },
+            { regex: /(?:tarih|date|issued|created|düzenleme|son\s*ödeme)[:\s]*([\d]{1,2}[.\/\-][\d]{1,2}[.\/\-][\d]{2,4})/i, score: 10 },
+            { regex: /(?:date|issued|created|due\s*date)[:\s]*([\d]{1,2}[\/\-][\d]{1,2}[\/\-][\d]{2,4})/i, score: 10 },
+            { regex: new RegExp(`paid\\s+on\\s+((?:${enMonths})[a-z]*\\s+\\d{1,2},?\\s+\\d{4})`, "i"), score: 8 },
+            { regex: new RegExp(`(\\d{1,2}\\s+(?:${trMonths}|${enMonths})[a-zıüğşçö]*\\s+\\d{4})`, "i"), score: 6 },
+            { regex: new RegExp(`((?:${enMonths}|${trMonths})[a-zıüğşçö]*\\s+\\d{1,2},?\\s+\\d{4})`, "i"), score: 6 },
+            { regex: /([\d]{1,2}\.[\d]{1,2}\.[\d]{4})/, score: 5 }
+        ];
+
+        for (const line of lines) {
+            for (const pattern of patterns) {
+                const match = line.match(pattern.regex);
+                if (match) {
+                    candidates.push({ value: match[1], score: pattern.score });
+                }
+            }
+        }
+
+        if (candidates.length === 0) {
+            return null;
+        }
+
+        candidates.sort((a, b) => b.score - a.score || b.value.length - a.value.length);
+        return candidates[0].value;
+    }
+
+    private extractVendorCandidate(text: string): string | null {
+        const lines = this.collectNonEmptyLines(text);
+        const candidates: Array<{ vendor: string; score: number }> = [];
+        const pushCandidate = (raw: string | null | undefined, score: number) => {
+            const sanitized = this.sanitizeVendorCandidate(raw || null);
+            if (!sanitized) {
+                return;
+            }
+            candidates.push({ vendor: sanitized, score });
+        };
+
+        const explicitPatterns: Array<{ regex: RegExp; score: number }> = [
+            { regex: /(?:from|vendor|company|billed?\s*by|seller|supplier|merchant|issued\s*by)[:\s]*([A-Za-zÇçĞğİıÖöŞşÜü][A-Za-zÇçĞğİıÖöŞşÜü0-9 &.,-]{2,50})/i, score: 12 },
+            { regex: /(?:firma|şirket|gönderen|hizmet\s*sağlayıcı|servis\s*sağlayıcı|kurum)[:\s]*([A-Za-zÇçĞğİıÖöŞşÜü][A-Za-zÇçĞğİıÖöŞşÜü0-9 &.,-]{2,50})/i, score: 12 },
+            { regex: /(?:payable\s*to|remit\s*to|pay\s*to\s*the\s*order\s*of)[:\s]*([A-Za-z][A-Za-z0-9 &.,-]{2,50})/i, score: 11 },
+            { regex: /(?:support|info|destek|iletisim)@([A-Za-z0-9-]+)\./i, score: 6 }
+        ];
+
+        for (const line of lines) {
+            for (const pattern of explicitPatterns) {
+                const match = line.match(pattern.regex);
+                if (match) {
+                    const value = pattern.regex.source.includes("@")
+                        ? match[1].charAt(0).toUpperCase() + match[1].slice(1)
+                        : match[1];
+                    pushCandidate(value, pattern.score);
+                }
+            }
+
+            const legalEntityMatch = line.match(/([A-Za-zÇçĞğİıÖöŞşÜü][A-Za-zÇçĞğİıÖöŞşÜü0-9 &.,-]+(?:,\s*)?(?:PBC|Inc\.?|LLC|Corp\.?|Ltd\.?|Co\.?|GmbH|A\.?Ş\.?|Ş\.?T\.?İ\.?))/);
+            if (legalEntityMatch) {
+                pushCandidate(legalEntityMatch[1], 10);
+            }
+
+            const knownCompanyMatch = line.match(/(Turkcell|Vodafone|Türk\s*Telekom|TEDAŞ|BEDAŞ|İGDAŞ|İSKİ|EÜAŞ|Enerjisa)/i);
+            if (knownCompanyMatch) {
+                pushCandidate(knownCompanyMatch[1], 10);
+            }
+        }
+
+        for (const line of lines.slice(0, 6)) {
+            const looksLikeTitle = /^[A-ZÇĞİÖŞÜ][A-Za-zÇçĞğİıÖöŞşÜü0-9&.,'’ -]{2,50}$/.test(line)
+                && /[A-Za-zÇçĞğİıÖöŞşÜü]/.test(line)
+                && !/(invoice|receipt|bill|date|total|amount|payment|fatura|tarih|due|balance|summary)/i.test(line);
+
+            if (looksLikeTitle) {
+                const bonus = /\s/.test(line) ? 7 : 4;
+                pushCandidate(line, bonus);
+            }
+        }
+
+        if (candidates.length === 0) {
+            return null;
+        }
+
+        candidates.sort((a, b) => b.score - a.score || b.vendor.length - a.vendor.length);
+        return candidates[0].vendor;
+    }
+
+    private extractAmountCandidate(text: string): { amount: string; currency: string } | null {
+        const lines = this.collectNonEmptyLines(text);
 
         const candidates: Array<{ amount: string; currency: string; score: number }> = [];
 
@@ -318,92 +769,23 @@ export class InvoiceEngine {
      * Step 3 — Extract structured fields from raw text using regex
      */
     async extractFields(text: string): Promise<ExtractedInvoice> {
+        const normalizedText = this.normalizeExtractedText(text);
+
         // Amount + Currency
         let amount: string | null = null;
         let currency: string | null = null;
-        const amountCandidate = this.extractAmountCandidate(text);
+        const amountCandidate = this.extractAmountCandidate(normalizedText);
         if (amountCandidate) {
             amount = amountCandidate.amount;
             currency = amountCandidate.currency;
         }
 
-        // Invoice number — EN + TR
-        const invoiceNumPatterns = [
-            /invoice\s*(?:#|no\.?|number|num)?\s*:?\s*([A-Z0-9][\w-]{2,30})/i,
-            // Turkish: "Fatura No" / "Fatura Numarası"
-            /fatura\s*(?:no\.?|numarası|numarasi)?\s*:?\s*([A-Z0-9][\w-]{2,30})/i,
-            /(?:inv|ref|reference)\s*(?:#|no\.?)?\s*:?\s*([A-Z0-9][\w-]{2,30})/i,
-            /#\s*([A-Z0-9][\w-]{3,30})/i
-        ];
-
-        let invoiceNumber: string | null = null;
-        for (const pattern of invoiceNumPatterns) {
-            const match = text.match(pattern);
-            if (match) {
-                invoiceNumber = match[1];
-                break;
-            }
-        }
-
-        // Date — EN + TR formats
-        const trMonths = "Ocak|Şubat|Mart|Nisan|Mayıs|Haziran|Temmuz|Ağustos|Eylül|Ekim|Kasım|Aralık";
-        const enMonths = "Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec";
-        const datePatterns = [
-            // "Date paid: January 22, 2026" / "Tarih: 22 Ocak 2026"
-            new RegExp(`(?:tarih|date\\s*paid|date|issued|created|düzenleme\\s*tarihi|fatura\\s*tarihi|son\\s*ödeme\\s*tarihi)[:\\s]*(\\d{1,2}[\\s.]+(?:${trMonths}|${enMonths})[a-zıüğşçö]*\\s+\\d{4})`, "i"),
-            new RegExp(`(?:tarih|date\\s*paid|date|issued|created)[:\\s]*((?:${enMonths}|${trMonths})[a-zıüğşçö]*\\s+\\d{1,2},?\\s+\\d{4})`, "i"),
-            // DD/MM/YYYY or DD.MM.YYYY (Turkish common format)
-            /(?:tarih|date|issued|created|düzenleme|son\s*ödeme)[:\s]*([\d]{1,2}[.\/\-][\d]{1,2}[.\/\-][\d]{2,4})/i,
-            /(?:date|issued|created|due\s*date)[:\s]*([\d]{1,2}[\/\-][\d]{1,2}[\/\-][\d]{2,4})/i,
-            // "$10.00 paid on January 22, 2026"
-            new RegExp(`paid\\s+on\\s+((?:${enMonths})[a-z]*\\s+\\d{1,2},?\\s+\\d{4})`, "i"),
-            // Standalone dates
-            new RegExp(`(\\d{1,2}\\s+(?:${trMonths}|${enMonths})[a-zıüğşçö]*\\s+\\d{4})`, "i"),
-            new RegExp(`((?:${enMonths}|${trMonths})[a-zıüğşçö]*\\s+\\d{1,2},?\\s+\\d{4})`, "i"),
-            // DD.MM.YYYY standalone
-            /([\d]{1,2}\.[\d]{1,2}\.[\d]{4})/,
-        ];
-
-        let date: string | null = null;
-        for (const pattern of datePatterns) {
-            const match = text.match(pattern);
-            if (match) {
-                date = match[1];
-                break;
-            }
-        }
+        const invoiceNumber = this.extractInvoiceNumberCandidate(normalizedText);
+        const date = this.extractDateCandidate(normalizedText);
 
         // Vendor name — EN + TR
         // NOTE: "Bill to" / "Fatura adresi" is the CUSTOMER, not the vendor!
-        const vendorPatterns = [
-            // EN explicit
-            /(?:from|vendor|company|billed?\s*by|seller|supplier|merchant|issued\s*by)[:\s]*([A-Za-zÇçĞğİıÖöŞşÜü][A-Za-zÇçĞğİıÖöŞşÜü0-9 &.,]{2,40})/i,
-            // TR explicit: "Firma", "Şirket", "Gönderen", "Hizmet Sağlayıcı"
-            /(?:firma|şirket|gönderen|hizmet\s*sağlayıcı|servis\s*sağlayıcı|kurum)[:\s]*([A-Za-zÇçĞğİıÖöŞşÜü][A-Za-zÇçĞğİıÖöŞşÜü0-9 &.,]{2,40})/i,
-            // Payable to / Remit to
-            /(?:payable\s*to|remit\s*to|pay\s*to\s*the\s*order\s*of)[:\s]*([A-Za-z][A-Za-z0-9 &.,]{2,40})/i,
-            // Company name after "PAYMENT ADDRESS:" 
-            /payment\s*address[:\s]+([A-Za-z][A-Za-z0-9 &.,]{2,40})/i,
-            // Turkish telecom/utility companies
-            /(Turkcell|Vodafone|Türk\s*Telekom|TEDAŞ|BEDAŞ|İGDAŞ|İSKİ|EÜAŞ|Enerjisa)/i,
-            // Legal entity suffixes (EN + TR)
-            /([A-Za-zÇçĞğİıÖöŞşÜü][A-Za-zÇçĞğİıÖöŞşÜü0-9 &.,]+(?:,\s*)?(?:PBC|Inc\.?|LLC|Corp\.?|Ltd\.?|Co\.?|GmbH|A\.?Ş\.?|Ş\.?T\.?İ\.?))/,
-            // "support@company.com" / "info@company.com"
-            /(?:support|info|destek|iletisim)@([A-Za-z0-9-]+)\./i,
-        ];
-
-        let vendor: string | null = null;
-        for (const pattern of vendorPatterns) {
-            const match = text.match(pattern);
-            if (match) {
-                vendor = match[1].trim();
-                // If extracted from email domain, capitalize first letter
-                if (pattern.source.includes("@")) {
-                    vendor = vendor.charAt(0).toUpperCase() + vendor.slice(1);
-                }
-                break;
-            }
-        }
+        const vendor = this.extractVendorCandidate(normalizedText);
 
         return {
             vendor,
@@ -416,179 +798,187 @@ export class InvoiceEngine {
     /**
      * Step 4-7 — Process invoice with risk analysis
      */
-    async processInvoice(chatId: number, extracted: ExtractedInvoice): Promise<void> {
+    async processInvoice(
+        chatId: number,
+        extracted: ExtractedInvoice,
+        metadata?: { sourceMessageId?: number | null; sourceMimeType?: string | null }
+    ): Promise<InvoiceSessionRecord | null> {
         const detectedAmount = this.getDetectedAmount(extracted);
-        const detectedCurrency = this.getDetectedCurrency(extracted);
 
         if (!detectedAmount && !extracted.vendor) {
-            this.bot.sendMessage(chatId,
-                "❌ I couldn't extract payment details from this document.\n\n" +
+            const errMsg = "❌ I couldn't extract payment details from this document.\n\n" +
                 "Make sure the invoice contains:\n" +
                 "• A total/amount (e.g. \"Total: $50.00 USDC\")\n" +
                 "• A vendor/company name\n\n" +
                 "You can also manually create a payment:\n" +
-                "`send 50 usdc jack`", { parse_mode: "Markdown" }
-            );
-            return;
+                "`send 50 usdc jack`";
+            this.bot.sendMessage(chatId, errMsg, { parse_mode: "Markdown" });
+            this.onMessage?.(chatId, errMsg);
+            return null;
         }
 
         if (!extracted.vendor) {
             extracted.vendor = "Unknown Vendor";
         }
         if (!detectedAmount) {
-            this.bot.sendMessage(chatId,
-                `📄 Found vendor: *${extracted.vendor}*\n\n` +
+            const errMsg = `📄 Found vendor: *${extracted.vendor}*\n\n` +
                 "But I couldn't detect the amount. " +
                 "Please send the payment manually:\n" +
-                "`send <amount> usdc <recipient>`", { parse_mode: "Markdown" }
-            );
-            return;
+                "`send <amount> usdc <recipient>`";
+            this.bot.sendMessage(chatId, errMsg, { parse_mode: "Markdown" });
+            this.onMessage?.(chatId, errMsg);
+            return null;
         }
 
-        if (!this.getSettlementAmount(extracted)) {
-            const vendorInfo = this.resolveInvoiceVendor(chatId, extracted);
-            let message = `📄 Invoice summary\n\n`;
-            message += `Vendor: **${vendorInfo.label}**\n`;
-            if (vendorInfo.resolvedAddress) {
-                message += `Resolved address: \`${vendorInfo.resolvedAddress}\`\n`;
-            }
-            message += `${this.buildInvoiceAmountLines(extracted).join("\n")}\n`;
-            message += `${this.buildReadinessLine(extracted, null, vendorInfo.canPreparePayment)}\n`;
-            if (extracted.invoiceNumber) message += `Invoice #: ${extracted.invoiceNumber}\n`;
-            if (extracted.date) message += `Date: ${extracted.date}\n`;
-            message += `\n⚠️ FX conversion is unavailable right now, so I won't prepare this payment automatically.\n\n`;
-            message += this.buildNextStepLines(chatId, extracted, null, vendorInfo.canPreparePayment).join("\n");
-
-            this.bot.sendMessage(chatId, message, { parse_mode: "Markdown" });
-            return;
+        const rawRisk = this.getSettlementAmount(extracted)
+            ? this.riskEngine.analyzeInvoiceRisk(chatId, extracted, this._lastRawText)
+            : null;
+        if (rawRisk) {
+            console.log(`[Risk] chatId=${chatId} score=${rawRisk.riskScore.toFixed(2)} level=${rawRisk.level} flags=[${rawRisk.flags.join(",")}]`);
         }
 
-        // ── Risk Analysis ──
-        const risk = this.riskEngine.analyzeInvoiceRisk(chatId, extracted, this._lastRawText);
-        console.log(`[Risk] chatId=${chatId} score=${risk.riskScore.toFixed(2)} level=${risk.level} flags=[${risk.flags.join(",")}]`);
-
-        // Save pending invoice data in memory for callback
-        this._pendingInvoice[chatId.toString()] = extracted;
-        this._pendingRisk[chatId.toString()] = risk;
-
-        if (risk.level === "HIGH_RISK") {
-            // Block payment — show risk details
-            const vendorInfo = this.resolveInvoiceVendor(chatId, extracted);
-            let message = `📄 Invoice summary\n\n`;
-            message += `Vendor: **${vendorInfo.label}**\n`;
-            if (vendorInfo.resolvedAddress) {
-                message += `Resolved address: \`${vendorInfo.resolvedAddress}\`\n`;
-            }
-            message += `${this.buildInvoiceAmountLines(extracted).join("\n")}\n`;
-            message += `${this.buildReadinessLine(extracted, risk, vendorInfo.canPreparePayment)}\n`;
-            if (extracted.invoiceNumber) message += `Invoice #: ${extracted.invoiceNumber}\n`;
-            if (extracted.date) message += `Date: ${extracted.date}\n`;
-            message += RiskEngine.formatRiskMessage(risk);
-            message += `\n\n🚫 Payment blocked due to high risk.\n\n`;
-            message += this.buildNextStepLines(chatId, extracted, risk, vendorInfo.canPreparePayment).join("\n");
-
-            this.bot.sendMessage(chatId, message, {
-                parse_mode: "Markdown",
-                ...(vendorInfo.canPreparePayment ? {
-                    reply_markup: {
-                        inline_keyboard: [
-                            [
-                                { text: "⚠️ Override & Pay", callback_data: `invpay_${chatId}` },
-                                { text: "Cancel", callback_data: `invcancel_${chatId}` }
-                            ]
-                        ]
-                    }
-                } : {})
-            });
-            return;
-        }
-
-        if (risk.level === "REVIEW") {
-            // Show warning but allow payment
-            const vendorInfo = this.resolveInvoiceVendor(chatId, extracted);
-
-            let message = `📄 Invoice summary\n\n`;
-            message += `Vendor: **${vendorInfo.label}**\n`;
-            if (vendorInfo.resolvedAddress) {
-                message += `Resolved address: \`${vendorInfo.resolvedAddress}\`\n`;
-            }
-            message += `${this.buildInvoiceAmountLines(extracted).join("\n")}\n`;
-            message += `${this.buildReadinessLine(extracted, risk, vendorInfo.canPreparePayment)}\n`;
-            if (extracted.invoiceNumber) message += `Invoice #: ${extracted.invoiceNumber}\n`;
-            if (extracted.date) message += `Date: ${extracted.date}\n`;
-            message += RiskEngine.formatRiskMessage(risk);
-            message += `\n\n${this.buildNextStepLines(chatId, extracted, risk, vendorInfo.canPreparePayment).join("\n")}`;
-
-            this.bot.sendMessage(chatId, message, {
-                parse_mode: "Markdown",
-                ...(vendorInfo.canPreparePayment ? {
-                    reply_markup: {
-                        inline_keyboard: [
-                            [
-                                { text: "Prepare Payment", callback_data: `invpay_${chatId}` },
-                                { text: "Cancel", callback_data: `invcancel_${chatId}` }
-                            ]
-                        ]
-                    }
-                } : {})
-            });
-            return;
-        }
-
-        // SAFE — proceed normally
-        await this.suggestPayment(chatId, extracted);
+        const session = this.upsertSession(chatId, extracted, rawRisk, metadata);
+        const message = this.buildSessionSummaryMessage(session);
+        this.bot.sendMessage(chatId, message, {
+            parse_mode: "Markdown",
+            ...(this.getInvoiceReplyMarkup(session) ? { reply_markup: this.getInvoiceReplyMarkup(session) } : {})
+        });
+        this.onMessage?.(chatId, message);
+        return session;
     }
 
     /**
-     * Step 5 — Display extraction results and offer payment buttons
+     * Silent version of processInvoice — runs extraction, risk scoring, stores the session
+     * in memory, but does NOT send any Telegram message. Returns the session or an error string.
+     * Use this when the caller (e.g. Orchestrator) wants to handle the response naturally.
      */
-    async suggestPayment(chatId: number, extracted: ExtractedInvoice): Promise<void> {
-        const vendorInfo = this.resolveInvoiceVendor(chatId, extracted);
+    async processInvoiceSilent(
+        chatId: number,
+        extracted: ExtractedInvoice,
+        metadata?: { sourceMessageId?: number | null; sourceMimeType?: string | null }
+    ): Promise<{ session: InvoiceSessionRecord; error: null } | { session: null; error: string }> {
+        const detectedAmount = this.getDetectedAmount(extracted);
 
-        this._pendingInvoice[chatId.toString()] = extracted;
-
-        let message = `📄 Invoice summary\n\n`;
-        message += `Vendor: **${vendorInfo.label}**\n`;
-        if (vendorInfo.resolvedAddress) {
-            message += `Resolved address: \`${vendorInfo.resolvedAddress}\`\n`;
+        if (!detectedAmount && !extracted.vendor) {
+            return { session: null, error: "Could not extract vendor or amount from the document." };
         }
-        message += `${this.buildInvoiceAmountLines(extracted).join("\n")}\n`;
-        message += `${this.buildReadinessLine(extracted, null, vendorInfo.canPreparePayment)}\n`;
-        if (extracted.invoiceNumber) message += `Invoice #: ${extracted.invoiceNumber}\n`;
-        if (extracted.date) message += `Date: ${extracted.date}\n`;
-        message += `\n✅ Risk check passed\n\n`;
-        message += this.buildNextStepLines(chatId, extracted, null, vendorInfo.canPreparePayment).join("\n");
 
-        this.bot.sendMessage(chatId, message, {
-            parse_mode: "Markdown",
-            ...(vendorInfo.canPreparePayment ? {
-                reply_markup: {
-                    inline_keyboard: [
-                        [
-                            { text: "Prepare Payment", callback_data: `invpay_${chatId}` },
-                            { text: "Cancel", callback_data: `invcancel_${chatId}` }
-                        ]
-                    ]
-                }
-            } : {})
-        });
+        if (!extracted.vendor) {
+            extracted.vendor = "Unknown Vendor";
+        }
+
+        const rawRisk = this.getSettlementAmount(extracted)
+            ? this.riskEngine.analyzeInvoiceRisk(chatId, extracted, this._lastRawText)
+            : null;
+
+        if (rawRisk) {
+            console.log(`[Risk] chatId=${chatId} score=${rawRisk.riskScore.toFixed(2)} level=${rawRisk.level} flags=[${rawRisk.flags.join(",")}]`);
+        }
+
+        const session = this.upsertSession(chatId, extracted, rawRisk, metadata);
+        return { session, error: null };
     }
 
-    // Temporary store for pending invoice extractions
-    private _pendingInvoice: Record<string, ExtractedInvoice> = {};
-    private _pendingRisk: Record<string, RiskResult> = {};
+    private _activeInvoiceSessions: Record<string, InvoiceSessionRecord> = {};
+
+    private refreshSession(session: InvoiceSessionRecord): InvoiceSessionRecord {
+        const nextResolution = this.resolveInvoiceVendor(session.chatId, session.invoice);
+        const nextRisk = this.buildInvoiceSessionRiskState(session.rawRisk, nextResolution);
+        const derivedStatus = this.deriveSessionStatus(nextResolution, nextRisk, session.invoice);
+
+        session.resolution = nextResolution;
+        session.risk = nextRisk;
+
+        if (session.status !== "awaiting_payment_confirmation"
+            && session.status !== "awaiting_override"
+            && session.status !== "paid"
+            && session.status !== "cancelled"
+            && session.status !== "closed") {
+            session.status = derivedStatus;
+        }
+
+        session.updatedAt = Date.now();
+        session.expiresAt = session.updatedAt + InvoiceEngine.SESSION_TTL_MS;
+        return session;
+    }
+
+    getActiveSession(chatId: number): InvoiceSessionRecord | null {
+        const session = this._activeInvoiceSessions[this.getSessionKey(chatId)];
+        if (!session) {
+            return null;
+        }
+
+        if (session.expiresAt <= Date.now()) {
+            delete this._activeInvoiceSessions[this.getSessionKey(chatId)];
+            return null;
+        }
+
+        return this.refreshSession(session);
+    }
+
+    markSessionAwaitingOverride(chatId: number, sessionId?: string): InvoiceSessionRecord | null {
+        const session = this.getActiveSession(chatId);
+        if (!session || (sessionId && session.id !== sessionId)) {
+            return null;
+        }
+
+        if (session.status === "review_required") {
+            session.status = "awaiting_override";
+            session.updatedAt = Date.now();
+            session.expiresAt = session.updatedAt + InvoiceEngine.SESSION_TTL_MS;
+        }
+        return session;
+    }
+
+    markSessionAwaitingPaymentConfirmation(chatId: number, sessionId?: string): InvoiceSessionRecord | null {
+        const session = this.getActiveSession(chatId);
+        if (!session || (sessionId && session.id !== sessionId)) {
+            return null;
+        }
+
+        session.status = "awaiting_payment_confirmation";
+        session.updatedAt = Date.now();
+        session.expiresAt = session.updatedAt + InvoiceEngine.SESSION_TTL_MS;
+        return session;
+    }
+
+    restoreSessionAfterPaymentInterruption(chatId: number, sessionId?: string): InvoiceSessionRecord | null {
+        const session = this.getActiveSession(chatId);
+        if (!session || (sessionId && session.id !== sessionId)) {
+            return null;
+        }
+
+        session.status = this.deriveSessionStatus(session.resolution, session.risk, session.invoice);
+        session.updatedAt = Date.now();
+        session.expiresAt = session.updatedAt + InvoiceEngine.SESSION_TTL_MS;
+        return session;
+    }
+
+    closeSession(chatId: number, status: Extract<InvoiceSessionStatus, "paid" | "cancelled" | "closed"> = "closed", sessionId?: string): void {
+        const session = this.getActiveSession(chatId);
+        if (!session || (sessionId && session.id !== sessionId)) {
+            return;
+        }
+
+        session.status = status;
+        session.updatedAt = Date.now();
+        delete this._activeInvoiceSessions[this.getSessionKey(chatId)];
+    }
+
+    markSessionPaid(chatId: number, sessionId?: string): void {
+        this.closeSession(chatId, "paid", sessionId);
+    }
 
     getPendingInvoice(chatId: number): ExtractedInvoice | null {
-        return this._pendingInvoice[chatId.toString()] || null;
+        return this.getActiveSession(chatId)?.invoice || null;
     }
 
     getPendingRisk(chatId: number): RiskResult | null {
-        return this._pendingRisk[chatId.toString()] || null;
+        return this.getActiveSession(chatId)?.rawRisk || null;
     }
 
     clearPendingInvoice(chatId: number): void {
-        delete this._pendingInvoice[chatId.toString()];
-        delete this._pendingRisk[chatId.toString()];
+        this.closeSession(chatId);
     }
 
     /**
@@ -596,10 +986,6 @@ export class InvoiceEngine {
      */
     storeInvoice(chatId: number, extracted: ExtractedInvoice): string {
         const settlementAmount = this.getSettlementAmount(extracted);
-
-        if (this.memoryStore && extracted.vendor && settlementAmount) {
-            this.memoryStore.recordInvoice(chatId, extracted.vendor, parseFloat(settlementAmount));
-        }
 
         return this.invoiceStore.saveInvoice(chatId, {
             vendor: extracted.vendor || "Unknown",

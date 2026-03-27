@@ -1,0 +1,36 @@
+{
+  "type": "https://eips.ethereum.org/EIPS/eip-8004#registration-v1",
+  "active": true,
+  "name": "Arc Pay Agent",
+  "description": "Conversational payment assistant for Arc Testnet with vendor payouts, invoice review, scheduled payments, and USDC settlement.",
+  "image": "ipfs://bafybeifb7wb2vhodq3ght44etqgrk65ue2ud4stfxqbynbzulm36gmx3hi",
+  "agent_type": "payment_assistant",
+  "capabilities": [
+    "vendor_payments",
+    "invoice_review",
+    "scheduled_payments",
+    "usdc_settlement"
+  ],
+  "registrations": [
+    {
+      "agentId": 40,
+      "agentRegistry": "eip155:1513:0x8004A818BFB912233c491871b3d84c89A494BD9e"
+    }
+  ],
+  "services": [
+    {
+      "name": "telegram",
+      "endpoint": "https://t.me/ArcPayAgentBot"
+    }
+  ],
+  "supportedTrust": [
+    "reputation"
+  ],
+  "x402Support": false,
+  "links": {
+    "telegram": "https://t.me/ArcPayAgentBot",
+    "x": "https://x.com/ArcPayAgent"
+  },
+  "version": "1.0.0",
+  "network": "arc-testnet"
+}

@@ -3,9 +3,13 @@ import { loadStore, saveStore } from "./persistence";
 const PENDING_PAYMENTS_FILE = "pending_payments.json";
 
 export interface PendingPaymentSource {
-    type: "direct" | "request" | "schedule";
+    type: "direct" | "request" | "schedule" | "invoice";
     requestId?: string;
     scheduleId?: string;
+    invoiceNumber?: string | null;
+    invoiceSessionId?: string;
+    riskLevelAtPreparation?: string | null;
+    requiredOverride?: boolean;
     originChatId?: number;
     originMessageId?: number;
 }
@@ -17,6 +21,7 @@ export interface PersistedPendingPayment {
     amount: string;
     memo: string | null;
     source?: PendingPaymentSource;
+    createdAt?: number;
 }
 
 export class PendingPaymentStore {
@@ -35,8 +40,18 @@ export class PendingPaymentStore {
     }
 
     setPendingPayment(chatId: number | string, payment: PersistedPendingPayment): void {
-        this.store[chatId.toString()] = payment;
+        this.store[chatId.toString()] = {
+            ...payment,
+            createdAt: payment.createdAt ?? Date.now()
+        };
         this.persist();
+    }
+
+    listAll(): { chatId: number; payment: PersistedPendingPayment }[] {
+        return Object.entries(this.store).map(([chatId, payment]) => ({
+            chatId: parseInt(chatId, 10),
+            payment
+        }));
     }
 
     clearPendingPayment(chatId: number | string): void {

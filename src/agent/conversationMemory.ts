@@ -14,14 +14,30 @@ export interface ConversationContext {
         settlementAmount?: string | null;
         settlementCurrency?: string | null;
         invoiceNumber: string | null;
+        riskLevel?: "safe" | "review" | "high_risk";
+        riskFlags?: string[];
     };
     /** Last payment that was prepared or sent */
     lastPayment?: {
         beneficiary: string;
         amount: string;
     };
+    /** Last schedule that was prepared or created */
+    lastSchedule?: {
+        id?: string;
+        beneficiary: string;
+        amount: string;
+        scheduledFor?: number;
+    };
+    /** Last vendor that was looked up or saved */
+    lastVendor?: {
+        name: string;
+        address?: string;
+    };
     /** Last action the bot took */
     lastAction?: string;
+    /** User's language code from Telegram (e.g. "tr", "en", "de") */
+    language?: string;
     /** Recent conversation messages (max 20) */
     messages: { role: "user" | "assistant"; content: string }[];
     /** Recent completed activities (max 20) */
@@ -67,11 +83,39 @@ export class ConversationMemory {
         ctx.lastAction = "analyze_invoice";
     }
 
+    clearLastInvoice(chatId: number): void {
+        const ctx = this.ensure(chatId);
+        delete ctx.lastInvoice;
+    }
+
     /** Store the last payment prepared */
     setLastPayment(chatId: number, beneficiary: string, amount: string): void {
         const ctx = this.ensure(chatId);
         ctx.lastPayment = { beneficiary, amount };
         ctx.lastAction = "create_payment";
+    }
+
+    /** Store the last schedule prepared */
+    setLastSchedule(chatId: number, beneficiary: string, amount: string, scheduledFor?: number, id?: string): void {
+        const ctx = this.ensure(chatId);
+        ctx.lastSchedule = { id, beneficiary, amount, scheduledFor };
+        ctx.lastAction = "schedule_payment";
+    }
+
+    setLanguage(chatId: number, lang: string): void {
+        if (!lang) return;
+        this.ensure(chatId).language = lang;
+    }
+
+    setLastVendor(chatId: number, name: string, address?: string): void {
+        const ctx = this.ensure(chatId);
+        ctx.lastVendor = { name, address };
+        ctx.lastAction = "vendor_detail";
+    }
+
+    clearLastVendor(chatId: number): void {
+        const ctx = this.ensure(chatId);
+        delete ctx.lastVendor;
     }
 
     /** Set lastAction */
@@ -95,6 +139,11 @@ export class ConversationMemory {
     /** Get full context for the user */
     getContext(chatId: number): ConversationContext {
         return this.ensure(chatId);
+    }
+
+    clearContext(chatId: number): void {
+        const id = chatId.toString();
+        delete this.memory[id];
     }
 
     /** Get conversation history formatted for LLM */
@@ -177,6 +226,11 @@ export class ConversationMemory {
         const ctx = this.ensure(chatId);
         const parts: string[] = [];
 
+        // Language hint — only emit when non-English so the LLM defaults to English normally
+        if (ctx.language && !ctx.language.startsWith("en")) {
+            parts.push(`[User language: ${ctx.language} — reply in this language]`);
+        }
+
         // Always provide current date/time (human-readable)
         const now = new Date();
         const dateStr = now.toLocaleString("en-US", {
@@ -197,10 +251,19 @@ export class ConversationMemory {
             const settlement = ctx.lastInvoice.settlementAmount && ctx.lastInvoice.settlementCurrency
                 ? `${ctx.lastInvoice.settlementAmount} ${ctx.lastInvoice.settlementCurrency}`
                 : `${ctx.lastInvoice.amount} ${ctx.lastInvoice.currency}`;
-            parts.push(`[Last analyzed invoice: vendor="${ctx.lastInvoice.vendor}", detected="${detected}", settlement="${settlement}", invoiceNumber="${ctx.lastInvoice.invoiceNumber}"]`);
+            const flagsInfo = ctx.lastInvoice.riskFlags?.length ? `, flags=[${ctx.lastInvoice.riskFlags.join(", ")}]` : "";
+            const riskInfo = ctx.lastInvoice.riskLevel ? `, risk="${ctx.lastInvoice.riskLevel}"${flagsInfo}` : "";
+            parts.push(`[Last analyzed invoice: vendor="${ctx.lastInvoice.vendor}", detected="${detected}", settlement="${settlement}", invoiceNumber="${ctx.lastInvoice.invoiceNumber}"${riskInfo}]`);
         }
         if (ctx.lastPayment) {
             parts.push(`[Last payment: ${ctx.lastPayment.amount} USDC to ${ctx.lastPayment.beneficiary}]`);
+        }
+        if (ctx.lastSchedule) {
+            const when = ctx.lastSchedule.scheduledFor ? new Date(ctx.lastSchedule.scheduledFor).toLocaleString("en-US") : "unknown time";
+            parts.push(`[Last schedule: ${ctx.lastSchedule.amount} USDC to ${ctx.lastSchedule.beneficiary} at ${when}]`);
+        }
+        if (ctx.lastVendor) {
+            parts.push(`[Last vendor: ${ctx.lastVendor.name}${ctx.lastVendor.address ? ` at ${ctx.lastVendor.address}` : ""}]`);
         }
         if (ctx.lastAction) {
             parts.push(`[Last action: ${ctx.lastAction}]`);

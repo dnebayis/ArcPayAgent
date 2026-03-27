@@ -3,6 +3,7 @@ import { ScheduleStore } from "../storage/schedules";
 import { PaymentEngine } from "../engines/paymentEngine";
 import { UserPreferencesStore } from "../storage/userPreferences";
 import { formatUserDateTime } from "../utils/userDateTime";
+import { escapeTelegramMarkdown } from "../utils/telegramMarkdown";
 
 export class SchedulerService {
     private timer: ReturnType<typeof setInterval> | null = null;
@@ -51,7 +52,7 @@ export class SchedulerService {
 
             this.bot.sendMessage(
                 chatId,
-                `⏰ **Scheduled payment due**${freqLabel}\n\nAmount: ${schedule.amount} USDC\nRecipient: **${schedule.vendor}**\nScheduled for: ${scheduledFor}\n\nChoose an action below.`,
+                `⏰ **Scheduled payment due**${freqLabel}\n\nAmount: ${schedule.amount} USDC\nRecipient: **${escapeTelegramMarkdown(schedule.vendor)}**\nScheduled for: ${scheduledFor}\n\nChoose an action below.`,
                 {
                     parse_mode: "Markdown",
                     reply_markup: {

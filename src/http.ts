@@ -35,6 +35,18 @@ export function createHealthServer(): Server {
     });
 }
 
+export function isRecoverableHealthServerError(
+    error: unknown,
+    options?: { required?: boolean }
+): boolean {
+    if (options?.required) {
+        return false;
+    }
+
+    const nodeError = error as NodeJS.ErrnoException | undefined;
+    return nodeError?.code === "EADDRINUSE";
+}
+
 export async function startHealthServer(port: number, host: string = "0.0.0.0"): Promise<Server> {
     const server = createHealthServer();
 

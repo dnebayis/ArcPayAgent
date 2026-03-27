@@ -14,11 +14,18 @@ const validEnv = {
 
 describe("loadRuntimeConfig", () => {
     it("should parse a valid production config", () => {
-        const config = loadRuntimeConfig(validEnv, { isTest: false });
+        const config = loadRuntimeConfig({
+            ...validEnv,
+            ARC_AGENT_METADATA_URI: "ipfs://agent",
+            ARC_AGENT_ID: "40",
+            ERC8004_IDENTITY_REGISTRY_ADDRESS: "0x8004A818BFB912233c491871b3d84c89A494BD9e"
+        }, { isTest: false });
 
         expect(config.ARC_RPC_URL).toBe(validEnv.ARC_RPC_URL);
         expect(config.USDC_ADDRESS).toBe(validEnv.USDC_ADDRESS);
         expect(config.PAYABLES_ROUTER_ADDRESS).toBe(validEnv.PAYABLES_ROUTER_ADDRESS);
+        expect(config.ARC_AGENT_METADATA_URI).toBe("ipfs://agent");
+        expect(config.ARC_AGENT_ID).toBe("40");
     });
 
     it("should reject missing required addresses", () => {
@@ -48,5 +55,20 @@ describe("loadRuntimeConfig", () => {
         expect(config.ARC_RPC_URL).toBe("https://rpc.testnet.arc.network");
         expect(config.USDC_ADDRESS).toBe("0x0000000000000000000000000000000000000000");
         expect(config.CIRCLE_API_URL).toBe("https://api.circle.com/v1/w3s");
+        expect(config.ARC_AGENT_METADATA_URI).toBeUndefined();
+    });
+
+    it("should treat empty optional agent overrides as undefined", () => {
+        const config = loadRuntimeConfig({
+            ...validEnv,
+            ARC_AGENT_METADATA_URI: "ipfs://agent",
+            ERC8004_IDENTITY_REGISTRY_ADDRESS: "",
+            ERC8004_REPUTATION_REGISTRY_ADDRESS: "",
+            ERC8004_VALIDATION_REGISTRY_ADDRESS: ""
+        }, { isTest: false });
+
+        expect(config.ERC8004_IDENTITY_REGISTRY_ADDRESS).toBeUndefined();
+        expect(config.ERC8004_REPUTATION_REGISTRY_ADDRESS).toBeUndefined();
+        expect(config.ERC8004_VALIDATION_REGISTRY_ADDRESS).toBeUndefined();
     });
 });

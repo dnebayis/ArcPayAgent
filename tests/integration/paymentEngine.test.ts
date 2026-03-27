@@ -17,9 +17,9 @@ describe("PaymentEngine Integration", () => {
 
     beforeEach(() => {
         mockBot = {
-            sendMessage: vi.fn(),
-            editMessageText: vi.fn(),
-            answerCallbackQuery: vi.fn(),
+            sendMessage: vi.fn().mockResolvedValue({}),
+            editMessageText: vi.fn().mockResolvedValue({}),
+            answerCallbackQuery: vi.fn().mockResolvedValue({}),
         };
 
         mockUsdc = {
@@ -266,8 +266,6 @@ describe("PaymentEngine Integration", () => {
             mockProvider,
             mockPaymentLogStore,
             mockCircleClient,
-            undefined,
-            undefined,
             pendingPaymentStore,
             submittedTransactionStore,
             postConfirmHandler
@@ -289,9 +287,9 @@ describe("PaymentEngine Integration", () => {
         );
 
         const restartedBot = {
-            sendMessage: vi.fn(),
-            editMessageText: vi.fn(),
-            answerCallbackQuery: vi.fn(),
+            sendMessage: vi.fn().mockResolvedValue({}),
+            editMessageText: vi.fn().mockResolvedValue({}),
+            answerCallbackQuery: vi.fn().mockResolvedValue({}),
         };
 
         const restartedEngine = new PaymentEngine(
@@ -304,8 +302,6 @@ describe("PaymentEngine Integration", () => {
             mockProvider,
             mockPaymentLogStore,
             mockCircleClient,
-            undefined,
-            undefined,
             pendingPaymentStore,
             submittedTransactionStore,
             postConfirmHandler
@@ -329,6 +325,46 @@ describe("PaymentEngine Integration", () => {
             })
         );
         expect(restartedBot.sendMessage).toHaveBeenCalledWith(12345, expect.stringContaining("Payment confirmed"), expect.any(Object));
+    });
+
+    it("should invoke the clear handler when an invoice payment is cancelled", async () => {
+        const postClearHandler = vi.fn();
+        const engine = new PaymentEngine(
+            mockBot,
+            mockUsdc,
+            mockRouter,
+            "0xRouter",
+            mockWalletStore,
+            mockVendorStore,
+            mockProvider,
+            mockPaymentLogStore,
+            mockCircleClient,
+            undefined,
+            undefined,
+            undefined,
+            postClearHandler
+        );
+
+        await engine.preparePayment(12345, "0x0000000000000000000000000000000000000001", "10", "ArcPay", {
+            source: {
+                type: "invoice",
+                invoiceSessionId: "inv-session-123",
+                invoiceNumber: "INV-123"
+            }
+        });
+
+        engine.cancelPendingPayment(12345);
+
+        expect(postClearHandler).toHaveBeenCalledWith(
+            12345,
+            expect.objectContaining({
+                source: expect.objectContaining({
+                    type: "invoice",
+                    invoiceSessionId: "inv-session-123"
+                })
+            }),
+            "cancelled"
+        );
     });
 
     it("should reject duplicate callback processing while a payment is in flight", async () => {
@@ -389,8 +425,6 @@ describe("PaymentEngine Integration", () => {
             mockPaymentLogStore,
             mockCircleClient,
             undefined,
-            undefined,
-            undefined,
             submittedTransactionStore
         );
 
@@ -446,8 +480,6 @@ describe("PaymentEngine Integration", () => {
             mockPaymentLogStore,
             mockCircleClient,
             undefined,
-            undefined,
-            undefined,
             submittedTransactionStore
         );
 
@@ -484,8 +516,6 @@ describe("PaymentEngine Integration", () => {
             mockProvider,
             mockPaymentLogStore,
             mockCircleClient,
-            undefined,
-            undefined,
             undefined,
             submittedTransactionStore
         );
@@ -580,6 +610,22 @@ describe("PaymentEngine Integration", () => {
         expect(mockBot.sendMessage).toHaveBeenCalledWith(
             12345,
             expect.stringContaining("USDC transfer failed")
+        );
+    });
+
+    it("should confirm a pending payment from text follow-up", async () => {
+        mockUsdc.allowance.mockResolvedValue(ethers.parseUnits("1000", 6));
+
+        const engine = new PaymentEngine(mockBot, mockUsdc, mockRouter, "0xRouter", mockWalletStore, mockVendorStore, mockProvider, mockPaymentLogStore, mockCircleClient);
+        await engine.preparePayment(12345, "0x0000000000000000000000000000000000000001", "0.0001");
+
+        await engine.confirmPendingPayment(12345);
+
+        expect(mockCircleClient.createTransaction).toHaveBeenCalledWith("circle-wallet-123", "0xRouter", "0xencodedPay", expect.any(String));
+        expect(mockBot.sendMessage).toHaveBeenCalledWith(
+            12345,
+            expect.stringContaining("Payment submitted"),
+            expect.any(Object)
         );
     });
 });

@@ -1,22 +1,84 @@
 import TelegramBot from "node-telegram-bot-api";
 import { WalletStore } from "../storage/walletStore";
-import { VendorStore } from "../storage/vendorStore";
 import { PaymentEngine } from "../engines/paymentEngine";
-import { IntentParser } from "../ai/intentParser";
-import { InvoiceEngine } from "../engines/invoiceEngine";
+import { InvoiceEngine, InvoiceSessionRecord } from "../engines/invoiceEngine";
 import { PaymentRequestEngine } from "../engines/paymentRequestEngine";
-import { ToolRouter } from "../agent/toolRouter";
 import { ConversationMemory } from "../agent/conversationMemory";
 import { ScheduleStore } from "../storage/schedules";
 import { UserPreferencesStore } from "../storage/userPreferences";
+import { Orchestrator } from "../core/orchestrator";
+
+/**
+ * Builds the message to send to the orchestrator after a silent invoice analysis.
+ * Incorporates the user's caption (if any) or generates a natural prompt.
+ */
+function buildInvoiceOrchestratorMessage(
+    result: { session: InvoiceSessionRecord; error: null } | { session: null; error: string },
+    caption?: string
+): string {
+    if (result.session === null) {
+        const base = "I uploaded a document but couldn't extract invoice details from it.";
+        return caption ? `${base} The user also asked: "${caption}"` : base;
+    }
+
+    const { invoice, risk, resolution } = result.session;
+    const vendor = invoice.vendor || "Unknown Vendor";
+    const detected = invoice.detectedAmount && invoice.detectedCurrency
+        ? `${invoice.detectedAmount} ${invoice.detectedCurrency}`
+        : null;
+    const settlement = invoice.settlementAmount
+        ? `${invoice.settlementAmount} ${invoice.settlementCurrency || "USDC"}`
+        : null;
+    const riskLabel = risk ? `risk=${risk.level.toLowerCase()}` : "risk=unknown";
+    const flags = risk?.flags?.length ? ` (${risk.flags.join(", ")})` : "";
+    const invNum = invoice.invoiceNumber ? `, invoice #${invoice.invoiceNumber}` : "";
+    const date = invoice.date ? `, date: ${invoice.date}` : "";
+    const vendorSaved = resolution.canPreparePayment ? ", vendor is saved" : ", vendor not saved yet";
+
+    const context = `[Invoice analyzed: vendor=${vendor}, detected=${detected || "unknown"}, settlement=${settlement || "unknown"}, ${riskLabel}${flags}${invNum}${date}${vendorSaved}]`;
+
+    if (caption) {
+        return `${context} ${caption}`;
+    }
+
+    return `${context} I just uploaded an invoice. Please analyze it and let me know if it looks safe to pay.`;
+}
+
+const HELP_MESSAGE = `📖 *Arc Pay Agent — Guide*
+
+*Wallet*
+\`create wallet\` · \`show wallet\` · \`wallet balance\`
+
+*Payments*
+\`send 5 usdc to aws\` · \`send 5 usdc to 0x...\`
+\`request 20 usdc\` · \`payment history\`
+
+*Vendors*
+\`save vendor aws 0x...\` · \`list vendors\`
+\`vendor aws\` · \`remove vendor aws\`
+
+*Invoices*
+Send a PDF or photo — I'll analyze it and guide you through payment.
+
+*Schedules*
+\`schedule 10 usdc to aws tomorrow\`
+\`list schedules\` · \`cancel schedule <id>\`
+
+*Reports*
+\`report\` · \`account summary\` · \`spending by vendor\`
+
+*LLM Key*
+\`/llmkey set openai sk-...\`
+\`/llmkey status\` · \`/llmkey model gpt-4o-mini\` · \`/llmkey remove\`
+
+You can also just describe what you want in plain language — no commands required.
+Follow us on X: @ArcPayAgent`;
 
 export function setupHandlers(
     bot: TelegramBot,
     walletStore: WalletStore,
-    vendorStore: VendorStore,
     llmKeyStore: any,
-    toolRouter: ToolRouter,
-    intentParser: IntentParser,
+    orchestrator: Orchestrator,
     paymentEngine?: PaymentEngine,
     invoiceEngine?: InvoiceEngine,
     paymentRequestEngine?: PaymentRequestEngine,
@@ -24,202 +86,53 @@ export function setupHandlers(
     scheduleStore?: ScheduleStore,
     userPreferencesStore?: UserPreferencesStore
 ) {
-    const helpMessage = `📖 *ArcPay Agent — Command Guide*
-
-*Wallet*
-• \`create wallet\` — Create your wallet
-• \`show wallet\` — Show your wallet address
-• \`wallet balance\` — Show live balance and recent chain activity
-• \`account summary\` — Show your account overview
-• \`status\` — Show account status
-• \`wallet recovery\` — Show wallet custody and recovery details
-
-*Payments*
-• \`send 5 usdc to jack\` — Send to a saved vendor
-• \`send 5 usdc to "Anthropic, PBC"\` — Send to a multi-word vendor
-• \`send 5 usdc to 0x...\` — Send to a wallet address
-• \`request 20 usdc\` — Create a payment link
-• \`payment history\` — Show recent payments
-
-*Address Book*
-• \`save vendor jack 0x...\` — Save a vendor
-• \`save vendor "Anthropic, PBC" 0x...\` — Save a multi-word vendor
-• \`my vendors\` — List saved vendors
-• \`vendor "Anthropic, PBC"\` — Show vendor details
-• \`top vendors\` — Show top vendors
-• \`remove vendor "Anthropic, PBC"\` — Remove one vendor
-
-*Invoices*
-• Send a PDF or photo invoice
-• \`analyze invoice\` — Ask for invoice extraction
-• \`pay that invoice\` — Use the last analyzed invoice
-
-*LLM*
-• \`/llmkey status\` — Show your saved LLM provider
-• \`/llmkey set openai sk-...\` — Save your own API key
-• \`/llmkey model gpt-4.1-mini\` — Set your preferred model
-• \`/llmkey remove\` — Remove your saved API key
-
-*Schedules*
-• \`schedule payment 10 usdc to aws tomorrow\` — Create a schedule for a saved vendor
-• \`schedule payment 10 usdc to 0x...\` — Create a schedule for a wallet address
-• \`list schedules\` — List active schedules
-• \`cancel schedule <id>\` — Cancel a schedule
-
-*Reports*
-• \`show recent payments\` — Show router activity
-• \`show pending payments\` — Show pending router status
-• \`report\` — Show spending summary
-• \`spending by vendor\` — Show vendor breakdown
-• \`monthly spending\` — Show monthly totals
-
-Need help with something specific? Contact @siyabaldacc.
-
-_Tip: Natural language works too. Example: “send 10 usdc to jack”, “show recent payments”, “pay the invoice”._`;
-
     bot.setMyCommands([
-        { command: "start", description: "Open the ArcPay quick start guide" },
-        { command: "help", description: "Show the full command guide" },
+        { command: "start", description: "Open the Arc Pay Agent quick start guide" },
+        { command: "help", description: "Show the full command guide" }
     ]).catch((error) => {
         console.warn("[Telegram] Failed to register bot commands:", error);
     });
 
-    bot.on('message', async (msg) => {
-        const chatId = msg.chat.id;
-        if (msg.from?.language_code && userPreferencesStore) {
-            userPreferencesStore.setLocaleIfMissing(chatId, msg.from.language_code);
-        }
-
-        // ── Handle document uploads (PDF invoices) ──
-        if (msg.document && invoiceEngine) {
-            const doc = msg.document;
-            const mime = doc.mime_type || "";
-
-            if (mime === "application/pdf") {
-                try {
-                    bot.sendMessage(chatId, "📄 Analyzing invoice PDF...");
-                    const fileLink = await bot.getFileLink(doc.file_id);
-                    const response = await fetch(fileLink);
-                    const buffer = Buffer.from(await response.arrayBuffer());
-                    const extracted = await invoiceEngine.analyzeInvoice(buffer, "application/pdf");
-
-                    // Store invoice context for follow-up references
-                    if (conversationMemory && (extracted.amount || extracted.vendor)) {
-                        conversationMemory.setLastInvoice(chatId, {
-                            vendor: extracted.vendor,
-                            amount: extracted.amount,
-                            currency: extracted.currency,
-                            detectedAmount: extracted.detectedAmount,
-                            detectedCurrency: extracted.detectedCurrency,
-                            settlementAmount: extracted.settlementAmount,
-                            settlementCurrency: extracted.settlementCurrency,
-                            invoiceNumber: extracted.invoiceNumber
-                        });
-                    }
-
-                    await invoiceEngine.processInvoice(chatId, extracted);
-                } catch (err: any) {
-                    bot.sendMessage(chatId, `❌ Failed to process PDF: ${err.message}`);
-                }
-                return;
-            }
-        }
-
-        // ── Handle photo uploads (image invoices via OCR) ──
-        if (msg.photo && msg.photo.length > 0 && invoiceEngine) {
-            try {
-                bot.sendMessage(chatId, "🖼️ Analyzing invoice image...");
-                const photo = msg.photo[msg.photo.length - 1];
-                const fileLink = await bot.getFileLink(photo.file_id);
-                const response = await fetch(fileLink);
-                const buffer = Buffer.from(await response.arrayBuffer());
-                const extracted = await invoiceEngine.analyzeInvoice(buffer, "image/png");
-
-                // Store invoice context for follow-up references
-                if (conversationMemory && (extracted.amount || extracted.vendor)) {
-                    conversationMemory.setLastInvoice(chatId, {
-                        vendor: extracted.vendor,
-                        amount: extracted.amount,
-                        currency: extracted.currency,
-                        detectedAmount: extracted.detectedAmount,
-                        detectedCurrency: extracted.detectedCurrency,
-                        settlementAmount: extracted.settlementAmount,
-                        settlementCurrency: extracted.settlementCurrency,
-                        invoiceNumber: extracted.invoiceNumber
-                    });
-                }
-
-                await invoiceEngine.processInvoice(chatId, extracted);
-            } catch (err: any) {
-                bot.sendMessage(chatId, `❌ Failed to process image: ${err.message}`);
-            }
-            return;
-        }
-
-        // ── Text message handling ──
-        const originalText = msg.text?.trim() || "";
-        const text = originalText.toLowerCase();
+    const handleTextTurn = async (chatId: number, originalText: string): Promise<void> => {
+        const text = originalText.toLowerCase().trim();
 
         if (!text) return;
+        if (!/[a-z0-9]/i.test(originalText)) return;
 
-        // ── /start deep link handling (must bypass intent parser) ──
-        // Use originalText to preserve case-sensitive request IDs
+        // /start deep link (payment request)
         const startMatch = originalText.match(/^\/start\s+req_(.+)/i);
         if (startMatch && paymentRequestEngine) {
-            const requestId = startMatch[1];
-            paymentRequestEngine.handleDeepLink(chatId, requestId);
+            paymentRequestEngine.handleDeepLink(chatId, startMatch[1]);
             return;
         }
 
-        // ── /start welcome message ──
+        // /start welcome
         if (text === "/start") {
-            const startMessage = `🚀 *Welcome to ArcPay Agent*
+            const startMessage = `👋 *Welcome to Arc Pay Agent*
 
-ArcPay helps you manage wallets, vendors, payments, invoices, and schedules on Arc testnet.
+I help you manage USDC payments, invoices, vendors, and schedules on Arc — just talk to me naturally.
 
-*Start here*
-• \`create wallet\`
-• \`show wallet\`
-• \`account summary\`
-• \`save vendor jack 0x...\`
-• \`send 5 usdc to jack\`
+*Quick start*
+\`create wallet\` · \`show wallet\`
+\`save vendor aws 0x...\` · \`send 5 usdc to aws\`
+Send a PDF or photo invoice to analyze and pay it
 
-*Also supported*
-• Send a PDF or photo invoice
-• \`request 20 usdc\`
-• \`schedule payment 10 usdc to aws tomorrow\`
-• \`schedule payment 10 usdc to 0x...\`
-• \`/llmkey set openai sk-...\`
+*Set your LLM key to get started*
+\`/llmkey set openai sk-...\`
 
-Type \`help\` or \`/help\` to see the full command list.
-
-Only the wallet owner can use payment, request, and schedule action buttons.`;
+Type \`/help\` for the full guide.
+Follow us: @ArcPayAgent`;
             bot.sendMessage(chatId, startMessage, { parse_mode: "Markdown" });
             return;
         }
 
-        // ── /help command ──
-        if (text === "/help") {
-            bot.sendMessage(chatId, helpMessage, { parse_mode: "Markdown" });
+        // /help
+        if (text === "/help" || /^help[!?\.]*$/i.test(originalText.trim())) {
+            bot.sendMessage(chatId, HELP_MESSAGE, { parse_mode: "Markdown" });
             return;
         }
 
-        if (
-            text === "help" ||
-            text === "commands" ||
-            text === "menu" ||
-            text.includes("list commands") ||
-            text.includes("list the commands") ||
-            text.includes("show commands") ||
-            text.includes("command list") ||
-            text.includes("commands in detail") ||
-            text.includes("what are the commands") ||
-            text.includes("what commands can you do")
-        ) {
-            bot.sendMessage(chatId, helpMessage, { parse_mode: "Markdown" });
-            return;
-        }
-
+        // /health and /ready info
         if (text === "/health" || text === "/ready") {
             const endpoint = text === "/health" ? "/health" : "/ready";
             bot.sendMessage(
@@ -230,6 +143,7 @@ Only the wallet owner can use payment, request, and schedule action buttons.`;
             return;
         }
 
+        // /llmkey
         const llmKeyMatch = originalText.match(/^\/llmkey(?:\s+(.+))?$/i);
         if (llmKeyMatch) {
             const rawArgs = llmKeyMatch[1]?.trim() || "";
@@ -240,34 +154,28 @@ Only the wallet owner can use payment, request, and schedule action buttons.`;
                 bot.sendMessage(chatId, `🔐 ${llmKeyStore.getStatus(chatId)}`);
                 return;
             }
-
             if (subcommand === "remove") {
                 const removed = llmKeyStore.removeKey(chatId);
                 bot.sendMessage(chatId, removed ? "✅ Your saved LLM key was removed." : "No saved LLM key was found for this account.");
                 return;
             }
-
             if (subcommand === "model") {
                 const model = rest.join(" ").trim();
                 if (!model) {
                     bot.sendMessage(chatId, "Usage: `/llmkey model gpt-4.1-mini`", { parse_mode: "Markdown" });
                     return;
                 }
-
                 const updated = llmKeyStore.setModel(chatId, model);
                 bot.sendMessage(chatId, updated ? `✅ Preferred LLM model set to \`${model}\`.` : "Set your LLM key first with `/llmkey set <provider> <api-key>`.", { parse_mode: "Markdown" });
                 return;
             }
-
             if (subcommand === "set") {
                 const provider = rest[0]?.toLowerCase();
                 const apiKey = rest.slice(1).join(" ").trim();
-
                 if (!provider || !apiKey) {
                     bot.sendMessage(chatId, "Usage: `/llmkey set openai sk-...`", { parse_mode: "Markdown" });
                     return;
                 }
-
                 llmKeyStore.setKey(chatId, provider, apiKey);
                 bot.sendMessage(chatId, `✅ Saved your LLM key for provider \`${provider}\`.`, { parse_mode: "Markdown" });
                 return;
@@ -281,115 +189,75 @@ Only the wallet owner can use payment, request, and schedule action buttons.`;
             return;
         }
 
-        // ── AI Intent Pipeline: Parse → Route ──
+        // All other text → orchestrator
         try {
-            // Track user message in conversation memory
-            if (conversationMemory) {
-                conversationMemory.addUserMessage(chatId, originalText);
-            }
-
-            const intent = await intentParser.parse(chatId, originalText);
-            await toolRouter.routeIntent(chatId, intent);
-
-            // Track bot response in conversation memory
-            if (conversationMemory) {
-                conversationMemory.setLastAction(chatId, intent.action);
-
-                if (intent.message) {
-                    // LLM provided a message (chat, greeting, etc.)
-                    conversationMemory.addBotMessage(chatId, intent.message);
-                } else {
-                    // Action intent — add a description so LLM knows what happened
-                    let summary = `I executed the ${intent.action} action.`;
-                    switch (intent.action) {
-                        case "show_wallet":
-                            summary = "I showed the wallet address.";
-                            break;
-                        case "create_wallet":
-                            summary = "I created a new wallet.";
-                            break;
-                        case "status":
-                            summary = "I showed the account status.";
-                            break;
-                        case "list_vendors":
-                            summary = "I listed the saved vendors.";
-                            break;
-                        case "vendor_detail":
-                            summary = intent.name ? `I showed details for vendor ${intent.name}.` : "I showed vendor details.";
-                            break;
-                        case "top_vendors":
-                            summary = "I showed the top vendors by spending.";
-                            break;
-                        case "export_wallet":
-                            summary = "I showed the wallet export details.";
-                            break;
-                        case "report":
-                            summary = "I showed the spending report.";
-                            break;
-                        case "spending_by_vendor":
-                            summary = "I showed spending broken down by vendor.";
-                            break;
-                        case "payment_history":
-                            summary = "I showed recent payment history.";
-                            break;
-                        case "monthly_spending":
-                            summary = "I showed the monthly spending breakdown.";
-                            break;
-                        case "analyze_invoice":
-                            summary = "I asked for an invoice file to analyze.";
-                            break;
-                        case "create_payment":
-                            summary = intent.amount && intent.beneficiary
-                                ? `I prepared a payment of ${intent.amount} USDC to ${intent.beneficiary}.`
-                                : "I prepared a payment.";
-                            if (intent.amount && intent.beneficiary) {
-                                conversationMemory.setLastPayment(chatId, intent.beneficiary, intent.amount.toString());
-                            }
-                            break;
-                        case "save_vendor":
-                            summary = intent.name ? `I saved vendor ${intent.name}.` : "I saved a vendor.";
-                            break;
-                        case "remove_vendor":
-                            summary = intent.name ? `I removed vendor ${intent.name}.` : "I removed a vendor.";
-                            break;
-                        case "remove_all_vendors":
-                            summary = "I removed all saved vendors.";
-                            break;
-                        case "create_payment_request":
-                            summary = intent.amount ? `I created a payment request for ${intent.amount} USDC.` : "I created a payment request.";
-                            break;
-                        case "schedule_payment":
-                            summary = intent.amount && intent.beneficiary
-                                ? `I scheduled ${intent.amount} USDC to ${intent.beneficiary}.`
-                                : "I scheduled a payment.";
-                            break;
-                        case "list_schedules":
-                            summary = "I listed the scheduled payments.";
-                            break;
-                        case "cancel_schedule":
-                            summary = intent.name ? `I cancelled schedule ${intent.name}.` : "I cancelled a schedule.";
-                            break;
-                        case "show_pending_payments":
-                            summary = "I showed pending router payment status.";
-                            break;
-                        case "show_recent_payments":
-                            summary = "I showed recent router payment activity.";
-                            break;
-                        case "wallet_intelligence":
-                            summary = "I showed the live wallet balance and recent activity.";
-                            break;
-                    }
-                    conversationMemory.addBotMessage(chatId, summary);
-                    conversationMemory.recordAction(chatId, intent.action, summary);
-                }
-            }
+            await orchestrator.handleMessage(chatId, originalText);
         } catch (error) {
-            console.error("Intent pipeline error:", error);
-            bot.sendMessage(chatId, "Something went wrong processing your request.");
+            console.error("[handlers] Orchestrator error:", error);
+            bot.sendMessage(chatId, "Something went wrong. Please try again.");
         }
+    };
+
+    bot.on("message", async (msg) => {
+        const chatId = msg.chat.id;
+
+        if (msg.from?.language_code) {
+            if (userPreferencesStore) userPreferencesStore.setLocaleIfMissing(chatId, msg.from.language_code);
+            conversationMemory?.setLanguage(chatId, msg.from.language_code);
+        }
+
+        // PDF invoice upload
+        if (msg.document && invoiceEngine) {
+            const doc = msg.document;
+            if (doc.mime_type === "application/pdf") {
+                try {
+                    bot.sendMessage(chatId, "📄 Analyzing invoice...");
+                    const fileLink = await bot.getFileLink(doc.file_id);
+                    const response = await fetch(fileLink);
+                    const buffer = Buffer.from(await response.arrayBuffer());
+                    const extracted = await invoiceEngine.analyzeInvoice(buffer, "application/pdf");
+                    const result = await invoiceEngine.processInvoiceSilent(chatId, extracted, {
+                        sourceMessageId: msg.message_id,
+                        sourceMimeType: "application/pdf"
+                    });
+                    const caption = msg.caption?.trim();
+                    const orchestratorMsg = buildInvoiceOrchestratorMessage(result, caption);
+                    await handleTextTurn(chatId, orchestratorMsg);
+                } catch (err: any) {
+                    bot.sendMessage(chatId, `❌ Failed to process PDF: ${err.message}`);
+                }
+                return;
+            }
+        }
+
+        // Photo invoice upload (OCR)
+        if (msg.photo && msg.photo.length > 0 && invoiceEngine) {
+            try {
+                bot.sendMessage(chatId, "🖼️ Analyzing invoice image...");
+                const photo = msg.photo[msg.photo.length - 1];
+                const fileLink = await bot.getFileLink(photo.file_id);
+                const response = await fetch(fileLink);
+                const buffer = Buffer.from(await response.arrayBuffer());
+                const extracted = await invoiceEngine.analyzeInvoice(buffer, "image/png");
+                const result = await invoiceEngine.processInvoiceSilent(chatId, extracted, {
+                    sourceMessageId: msg.message_id,
+                    sourceMimeType: "image/png"
+                });
+                const caption = msg.caption?.trim();
+                const orchestratorMsg = buildInvoiceOrchestratorMessage(result, caption);
+                await handleTextTurn(chatId, orchestratorMsg);
+            } catch (err: any) {
+                bot.sendMessage(chatId, `❌ Failed to process image: ${err.message}`);
+            }
+            return;
+        }
+
+        // Text message
+        const originalText = msg.text?.trim() || "";
+        await handleTextTurn(chatId, originalText);
     });
 
-    bot.on('callback_query', async (query) => {
+    bot.on("callback_query", async (query) => {
         const data = query.data;
         if (!data || !query.message) return;
         const chatId = query.message.chat.id;
@@ -404,7 +272,7 @@ Only the wallet owner can use payment, request, and schedule action buttons.`;
             text: "This action is not available for your account."
         });
 
-        // ── Invoice callbacks ──
+        // Invoice: pay
         if (data.startsWith("invpay_") && invoiceEngine && paymentEngine) {
             const ownerChatId = parseInt(data.replace("invpay_", ""), 10);
             if (!Number.isInteger(ownerChatId) || ownerChatId !== senderId) {
@@ -412,54 +280,63 @@ Only the wallet owner can use payment, request, and schedule action buttons.`;
                 return;
             }
 
-            let pending = invoiceEngine.getPendingInvoice(ownerChatId);
-
-            // Fall back to conversation memory if pending invoice was lost (e.g. bot restart)
-            if ((!pending || !pending.amount) && conversationMemory) {
-                const lastInv = conversationMemory.getContext(ownerChatId).lastInvoice;
-                if (lastInv && lastInv.amount) {
-                    pending = {
-                        vendor: lastInv.vendor,
-                        amount: lastInv.amount,
-                        currency: lastInv.currency,
-                        detectedAmount: lastInv.detectedAmount,
-                        detectedCurrency: lastInv.detectedCurrency,
-                        settlementAmount: lastInv.settlementAmount,
-                        settlementCurrency: lastInv.settlementCurrency,
-                        invoiceNumber: lastInv.invoiceNumber || null,
-                        date: null
-                    };
-                }
-            }
-
-            if (!pending || !pending.amount || !pending.vendor) {
+            const session = invoiceEngine.getActiveSession(ownerChatId);
+            if (!session || !session.invoice.amount || !session.invoice.vendor) {
                 bot.answerCallbackQuery(query.id, { text: "Invoice session expired. Please resend the invoice." });
                 return;
             }
 
-            invoiceEngine.storeInvoice(ownerChatId, pending);
+            if (session.risk?.blocked) {
+                await bot.answerCallbackQuery(query.id, { text: "This invoice is blocked due to high risk." });
+                return;
+            }
 
-            const vendorAddress = vendorStore.getVendor(ownerChatId, pending.vendor);
-            const beneficiary = vendorAddress || pending.vendor;
+            if (session.risk?.requiresOverride || session.status === "review_required" || session.status === "awaiting_override") {
+                await bot.answerCallbackQuery(query.id, {
+                    text: "Review required first. Say 'pay it anyway' if you want to continue."
+                });
+                await bot.sendMessage(ownerChatId, "This invoice still needs review before I prepare a payment. If you've reviewed the flags and want to continue, say `pay it anyway`.", {
+                    parse_mode: "Markdown"
+                });
+                return;
+            }
 
+            if (!session.resolution.canPreparePayment) {
+                await bot.answerCallbackQuery(query.id, { text: "Save the vendor with a wallet address first." });
+                await bot.sendMessage(ownerChatId, `Save vendor "${session.invoice.vendor}" with a wallet address first, then I can prepare this invoice payment automatically.`);
+                return;
+            }
+
+            invoiceEngine.storeInvoice(ownerChatId, session.invoice);
             bot.editMessageText("Preparing payment from invoice...", {
                 chat_id: chatId,
                 message_id: query.message.message_id
             });
 
-            invoiceEngine.clearPendingInvoice(ownerChatId);
-            paymentEngine.preparePayment(ownerChatId, beneficiary, pending.amount, `Invoice ${pending.invoiceNumber || "N/A"}`);
+            invoiceEngine.markSessionAwaitingPaymentConfirmation(ownerChatId, session.id);
+            const beneficiary = session.resolution.matchedVendorName || session.invoice.vendor;
+            paymentEngine.preparePayment(ownerChatId, beneficiary, session.invoice.amount, `Invoice ${session.invoice.invoiceNumber || "N/A"}`, {
+                source: {
+                    type: "invoice",
+                    invoiceNumber: session.invoice.invoiceNumber || null,
+                    invoiceSessionId: session.id,
+                    riskLevelAtPreparation: session.risk?.level || null,
+                    requiredOverride: false,
+                    originChatId: chatId,
+                    originMessageId: query.message.message_id
+                }
+            });
             return;
         }
 
+        // Invoice: cancel
         if (data.startsWith("invcancel_") && invoiceEngine) {
             const ownerChatId = parseInt(data.replace("invcancel_", ""), 10);
             if (!Number.isInteger(ownerChatId) || ownerChatId !== senderId) {
                 await rejectUnauthorized();
                 return;
             }
-
-            invoiceEngine.clearPendingInvoice(ownerChatId);
+            invoiceEngine.closeSession(ownerChatId, "cancelled");
             bot.editMessageText("Invoice cancelled.", {
                 chat_id: chatId,
                 message_id: query.message.message_id
@@ -467,7 +344,7 @@ Only the wallet owner can use payment, request, and schedule action buttons.`;
             return;
         }
 
-        // ── Payment request callbacks ──
+        // Payment request: pay
         if (data.startsWith("reqpay_") && paymentRequestEngine && paymentEngine) {
             const parts = data.split("_");
             const ownerChatId = parseInt(parts[1], 10);
@@ -475,18 +352,16 @@ Only the wallet owner can use payment, request, and schedule action buttons.`;
                 await rejectUnauthorized();
                 return;
             }
-            if (!parts[2]) {
+            const requestId = parts[2];
+            if (!requestId) {
                 bot.answerCallbackQuery(query.id, { text: "Invalid payment request data." });
                 return;
             }
-            const requestId = parts[2];
             const request = paymentRequestEngine.getRequest(requestId);
-
             if (!request) {
                 bot.answerCallbackQuery(query.id, { text: "Payment request not found." });
                 return;
             }
-
             if (request.paid) {
                 bot.editMessageText("This payment request has already been completed.", {
                     chat_id: chatId,
@@ -494,7 +369,6 @@ Only the wallet owner can use payment, request, and schedule action buttons.`;
                 });
                 return;
             }
-
             bot.answerCallbackQuery(query.id, { text: "Opening payment confirmation..." });
             paymentEngine.preparePayment(
                 ownerChatId,
@@ -513,6 +387,7 @@ Only the wallet owner can use payment, request, and schedule action buttons.`;
             return;
         }
 
+        // Payment request: cancel
         if (data.startsWith("reqcancel_")) {
             const parts = data.split("_");
             const ownerChatId = parseInt(parts[1], 10);
@@ -527,7 +402,26 @@ Only the wallet owner can use payment, request, and schedule action buttons.`;
             return;
         }
 
-        // ── Schedule callbacks (format: sched_pay_<ownerChatId>_<scheduleId>) ──
+        // Schedule: pick cancel
+        if (data.startsWith("pick_cancel_sched_") && scheduleStore) {
+            const parts = data.replace("pick_cancel_sched_", "").split("_");
+            const ownerChatId = parseInt(parts[0], 10);
+            const scheduleId = parts.slice(1).join("_");
+            if (!Number.isInteger(ownerChatId) || ownerChatId !== senderId) {
+                await rejectUnauthorized();
+                return;
+            }
+            await bot.answerCallbackQuery(query.id, { text: "Cancelling selected schedule..." });
+            await bot.editMessageText(`Cancelling schedule ${scheduleId}...`, {
+                chat_id: chatId,
+                message_id: query.message.message_id
+            });
+            scheduleStore.cancelSchedule(ownerChatId, scheduleId);
+            await bot.sendMessage(ownerChatId, `❌ Scheduled payment ${scheduleId} cancelled.`);
+            return;
+        }
+
+        // Schedule: pay now
         if (data.startsWith("sched_pay_") && paymentEngine && scheduleStore) {
             const parts = data.replace("sched_pay_", "").split("_");
             const ownerChatId = parseInt(parts[0], 10);
@@ -559,6 +453,7 @@ Only the wallet owner can use payment, request, and schedule action buttons.`;
             return;
         }
 
+        // Schedule: cancel
         if (data.startsWith("sched_cancel_") && scheduleStore) {
             const parts = data.replace("sched_cancel_", "").split("_");
             const ownerChatId = parseInt(parts[0], 10);
@@ -575,7 +470,7 @@ Only the wallet owner can use payment, request, and schedule action buttons.`;
             return;
         }
 
-        // ── Payment callbacks (confirm, approve, cancel) ──
+        // Payment confirm/cancel callbacks
         if (paymentEngine) {
             paymentEngine.processCallback(query);
         }

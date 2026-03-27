@@ -89,7 +89,7 @@ describe("PaymentLogStore", () => {
 describe("AnalyticsEngine", () => {
     function createEngine() {
         const mockBot = {
-            sendMessage: vi.fn()
+            sendMessage: vi.fn().mockResolvedValue({})
         } as any;
         const store = new PaymentLogStore();
         const engine = new AnalyticsEngine(mockBot, store);
@@ -157,7 +157,12 @@ describe("AnalyticsEngine", () => {
         );
         expect(mockBot.sendMessage).toHaveBeenCalledWith(
             1,
-            expect.stringContaining("Total: 155 USDC"),
+            expect.stringContaining("**Total spend:** 155 USDC"),
+            expect.any(Object)
+        );
+        expect(mockBot.sendMessage).toHaveBeenCalledWith(
+            1,
+            expect.stringContaining("**Top vendor:** aws"),
             expect.any(Object)
         );
     });
@@ -197,5 +202,66 @@ describe("AnalyticsEngine", () => {
         const since30d = now - 30 * 24 * 60 * 60 * 1000;
         expect(engine.getTotalSpending(1, since30d)).toBe(50);
         expect(engine.getTotalSpending(1)).toBe(150);
+    });
+
+    it("should show vendor breakdown with a dedicated format", () => {
+        const { mockBot, store, engine } = createEngine();
+
+        store.logPayment(1, { vendor: "aws", address: "0x1", amount: 100, timestamp: Date.now(), memo: "", txHash: "0x1" });
+        store.logPayment(1, { vendor: "openai", address: "0x2", amount: 25, timestamp: Date.now(), memo: "", txHash: "0x2" });
+
+        engine.showVendorBreakdown(1, "month");
+
+        expect(mockBot.sendMessage).toHaveBeenCalledWith(
+            1,
+            expect.stringContaining("Vendor Breakdown"),
+            expect.any(Object)
+        );
+        expect(mockBot.sendMessage).toHaveBeenCalledWith(
+            1,
+            expect.stringContaining("1. **aws**"),
+            expect.any(Object)
+        );
+        expect(mockBot.sendMessage).toHaveBeenCalledWith(
+            1,
+            expect.stringContaining("Total vendor spend: 125 USDC"),
+            expect.any(Object)
+        );
+    });
+
+    it("should show vendor-breakdown empty state when no payments exist", () => {
+        const { mockBot, engine } = createEngine();
+
+        engine.showVendorBreakdown(1, "all");
+
+        expect(mockBot.sendMessage).toHaveBeenCalledWith(
+            1,
+            expect.stringContaining("No vendor spending recorded")
+        );
+    });
+
+    it("should show monthly breakdown with summary stats", () => {
+        const { mockBot, store, engine } = createEngine();
+
+        store.logPayment(1, { vendor: "aws", address: "0x1", amount: 50, timestamp: new Date("2026-01-15").getTime(), memo: "", txHash: "0x1" });
+        store.logPayment(1, { vendor: "gcp", address: "0x2", amount: 30, timestamp: new Date("2026-02-10").getTime(), memo: "", txHash: "0x2" });
+
+        engine.showMonthlyBreakdown(1);
+
+        expect(mockBot.sendMessage).toHaveBeenCalledWith(
+            1,
+            expect.stringContaining("Monthly Spending"),
+            expect.any(Object)
+        );
+        expect(mockBot.sendMessage).toHaveBeenCalledWith(
+            1,
+            expect.stringContaining("**Lifetime spend tracked:** 80 USDC"),
+            expect.any(Object)
+        );
+        expect(mockBot.sendMessage).toHaveBeenCalledWith(
+            1,
+            expect.stringContaining("**Months with activity:** 2"),
+            expect.any(Object)
+        );
     });
 });
