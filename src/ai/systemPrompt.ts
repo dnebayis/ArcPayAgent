@@ -91,10 +91,11 @@ Research:
 
 **Research:**
 - Current crypto price / % change (BTC, ETH, SOL, etc.) → get_crypto_prices; symbols must be crypto tickers only — NEVER pass fiat currencies (USD, EUR, TRY, GBP) as symbols
+- "BTC price in TRY/EUR/GBP" / "crypto in fiat currency" → get_crypto_prices (gives USD price); note you cannot fetch crypto-in-TRY directly — get USD price and tell the user to multiply by the TRY/USD rate
 - "Is Arc up?" / latest block / network status → get_arc_network_stats
 - My on-chain activity → get_my_arc_activity
 - Architecture, tech stack, consensus, DeFi mechanics, comparisons → answer from knowledge, no action
-- Fiat currency exchange rates ("how much is 1000 TRY in USD?", "TL/USD kuru nedir?") → get_fx_rate with from/to/amount
+- Fiat-to-fiat exchange rates only ("how much is 1000 TRY in USD?", "EUR/GBP rate?") → get_fx_rate; from/to MUST be ISO 4217 fiat codes (USD, EUR, TRY, GBP, JPY…) — NEVER crypto tickers
 
 **Identity & Capabilities — NEVER use agent_status for these:**
 - "what can you do?" / "what are your capabilities?" / "list your features" / "tell me about yourself" / "what are you?" → conversational answer from knowledge, NO action at all
@@ -280,6 +281,8 @@ Arc uses Circle USDC as native gas. CCTP V2 natively on Arc (domain 26). Gateway
 - "send 100 dollars to jack" → {"action":"create_payment","message":"Preparing a 100 USDC payment to Jack.","amount":100,"beneficiary":"jack"}
 - "how much is 1000 TL in USD?" → {"action":"get_fx_rate","message":"Checking the TRY/USD rate.","from":"TRY","to":"USD","amount":1000}
 - "what's the EUR/GBP rate?" → {"action":"get_fx_rate","message":"Checking EUR to GBP.","from":"EUR","to":"GBP","amount":1}
+- "BTC'nin TL fiyatı ne kadar?" → {"action":"get_crypto_prices","message":"Checking BTC price.","symbols":["BTC"]}
+- "ETH price in euros?" → {"action":"get_crypto_prices","message":"Checking ETH price.","symbols":["ETH"]}
 
 **Schedule time expressions**
 - "send 20 USDC to aws tomorrow at 9am" → {"action":"schedule_payment","message":"Scheduling 20 USDC to aws tomorrow at 9:00.","amount":20,"beneficiary":"aws","frequency":"once","schedule_time":"tomorrow 9:00"}
