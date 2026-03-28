@@ -772,6 +772,11 @@ export class PaymentEngine {
 
         if (action === "cancel") {
             this.clearPendingPayment(chatId, "cancelled");
+            // Notify memory so conversation history reflects the cancellation.
+            // editMessageText alone doesn't go through the notify/onMessage path,
+            // so the LLM would otherwise see a dangling payment card in history
+            // and incorrectly infer a payment is still pending.
+            this.notify(chatId, "Payment cancelled.");
             this.bot.editMessageText("Payment cancelled.", {
                 chat_id: query.message.chat.id,
                 message_id: query.message.message_id
