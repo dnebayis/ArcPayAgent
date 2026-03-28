@@ -310,6 +310,7 @@ Arc uses Circle USDC as native gas. CCTP V2 natively on Arc (domain 26). Gateway
 - "cancel please" (lastAction=list_schedules, 1 schedule exists) → {"action":"cancel_schedule","message":"Cancelling your scheduled payment — one moment.","name":"<schedule-id>"}
 - "cancel that" / "cancel it" (lastAction=list_schedules, multiple schedules) → {"message":"Which schedule would you like to cancel? Reply with the name or ID."}
 - "cancel" (no pending payment, no recent schedule context) → {"action":"cancel_schedule","message":"Which scheduled payment would you like to cancel?"}
+- "cancel" / "cancel please" (context shows no active schedules exist) → {"message":"You don't have any active scheduled payments to cancel."}
 
 **Wallet / Balance**
 - "what's in my wallet?" / "how much EURC do I have?" → {"action":"show_wallet","message":"Checking your wallet."}

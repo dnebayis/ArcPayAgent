@@ -57,7 +57,7 @@ export class Orchestrator {
      * Payment modification during pending payment (e.g. "not 1 eurc, send 10 eurc", "actually make it 50").
      * These should be blocked while a payment is awaiting confirmation.
      */
-    private static readonly PAYMENT_MODIFY_PATTERN = /\b\d+(\.\d+)?\s*(usdc|eurc)\b|\b(not|instead|change|make it|actually)\b/i;
+    private static readonly PAYMENT_MODIFY_PATTERN = /\b\d+(\.\d+)?\s*(usdc|eurc)\b|\b(instead|change|make it|actually)\b/i;
 
     /**
      * Capability queries — intercepted before the LLM to prevent agent_status misrouting.

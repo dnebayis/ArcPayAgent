@@ -137,7 +137,7 @@ describe("CANCEL_PATTERN", () => {
 
 describe("PAYMENT_MODIFY_PATTERN", () => {
     const matches = [
-        "not 1 eurc send 10 eurc",
+        "not 1 eurc send 10 eurc",   // matches via the numeric part (1 eurc)
         "actually make it 50",
         "actually send 100 usdc",
         "change to 200 usdc",
@@ -157,6 +157,10 @@ describe("PAYMENT_MODIFY_PATTERN", () => {
         "show my balance",
         "list vendors",
         "what can you do?",
+        // 'not' alone must not trigger the guard (too broad — catches "I'm not sure")
+        "not sure",
+        "I'm not sure how much",
+        "I need to make a payment to aws but I'm not sure how much, can you help?",
     ];
 
     it.each(matches)('matches "%s"', (phrase) => {

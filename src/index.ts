@@ -255,6 +255,10 @@ export async function main() {
             }
         },
         (chatId, payment, reason) => {
+            // Always clear the stale lastAction so the orchestrator's pending-payment
+            // guards (confirm / cancel / modify) stop firing after the payment resolves.
+            conversationMemory.setLastAction(chatId, "payment_cleared");
+
             const source = payment.source;
             if (!source || source.type !== "invoice") return;
             if (reason === "cancelled" || reason === "failed") {
