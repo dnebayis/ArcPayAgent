@@ -11,6 +11,7 @@ import { PendingPaymentSource, PendingPaymentStore } from "../storage/pendingPay
 import { SubmittedTransactionContext, SubmittedTransactionRecord, SubmittedTransactionStatus, SubmittedTransactionStore } from "../storage/submittedTransactions";
 import { getArcGasReserveUsdc, getExpectedArcChainId } from "../blockchain/arcConfig";
 import { escapeTelegramMarkdown } from "../utils/telegramMarkdown";
+import { logger } from "../utils/logger";
 
 export interface PendingPayment {
     beneficiary: string;
@@ -53,11 +54,24 @@ export class PaymentEngine {
         this.onMessage?.(chatId, msg);
     }
 
-    private sendAndNotify(chatId: number, msg: string, opts?: any): Promise<TelegramBot.Message> {
+    private async sendAndNotify(chatId: number, msg: string, opts?: any): Promise<TelegramBot.Message | undefined> {
         this.notify(chatId, msg);
-        return opts
-            ? this.bot.sendMessage(chatId, msg, opts)
-            : this.bot.sendMessage(chatId, msg);
+        try {
+            return await this.bot.sendMessage(chatId, msg, opts);
+        } catch (firstErr: any) {
+            if (!opts) {
+                logger.warn(null, "[PaymentEngine] sendMessage failed", { chatId, error: firstErr?.message, preview: msg.slice(0, 80) });
+                return undefined;
+            }
+            // Retry: strip parse_mode (common cause of 400 errors) but KEEP reply_markup so buttons survive
+            const { parse_mode: _dropped, ...fallbackOpts } = opts as Record<string, unknown>;
+            try {
+                return await this.bot.sendMessage(chatId, msg, fallbackOpts as any);
+            } catch (secondErr: any) {
+                logger.warn(null, "[PaymentEngine] sendMessage failed after retry", { chatId, error: secondErr?.message, preview: msg.slice(0, 80) });
+                return undefined;
+            }
+        }
     }
 
     private persistPendingPayment(chatId: number, payment: PendingPayment): void {

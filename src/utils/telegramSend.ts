@@ -20,9 +20,11 @@ export async function safeSend(
         try {
             await bot.sendMessage(chatId, chunk, opts as any);
         } catch (firstErr: any) {
-            // Retry once without formatting options (parse_mode can cause failures on malformed markdown)
+            // Retry once: strip parse_mode (common cause of 400 errors on malformed markdown)
+            // but KEEP reply_markup so inline keyboard buttons are preserved.
+            const fallbackOpts = opts ? (({ parse_mode: _p, ...rest }) => rest)(opts as Record<string, unknown>) : undefined;
             try {
-                await bot.sendMessage(chatId, chunk);
+                await bot.sendMessage(chatId, chunk, fallbackOpts as any);
             } catch (secondErr: any) {
                 logger.warn(null, "[Telegram] Message send failed after retry", {
                     chatId,
