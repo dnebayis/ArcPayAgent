@@ -282,11 +282,8 @@ export class ToolDispatcher {
                 return "Vendor breakdown shown.";
             }
 
-            case "payment_history": {
-                await analyticsEngine.showHistory(chatId, 10);
-                return "Payment history shown.";
-            }
-
+            // payment_history is a legacy alias — route to show_recent_payments
+            case "payment_history":
             case "show_recent_payments": {
                 const result = await internalTools.execute(chatId, "recent_payments", { limit: 5 });
                 await this.reply(chatId, result.summary, { parse_mode: "Markdown" });

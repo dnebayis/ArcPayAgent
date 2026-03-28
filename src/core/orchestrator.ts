@@ -82,7 +82,7 @@ export class Orchestrator {
      * loading indicator (≤120 chars). Long or fabricated messages are suppressed.
      */
     private static readonly DATA_DISPLAY_ACTIONS = new Set([
-        "list_vendors", "show_wallet", "monthly_spending", "payment_history",
+        "list_vendors", "show_wallet", "monthly_spending",
         "show_recent_payments", "report", "spending_by_vendor", "list_schedules",
         "top_vendors", "list_price_alerts", "account_summary", "vendor_detail",
         "wallet_intelligence", "show_pending_payments", "agent_status",

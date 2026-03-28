@@ -48,7 +48,6 @@ export const TERMINAL_ACTIONS = new Set([
     "show_wallet",
     "wallet_intelligence",
     "monthly_spending",
-    "payment_history",
     "show_recent_payments",
     "report",
     "spending_by_vendor",
@@ -121,7 +120,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
     },
     {
         name: "create_payment_request",
-        description: "Create a shareable payment request link for a given USDC amount",
+        description: "Create a shareable Telegram deep-link so someone else can pay you. Use when user wants to RECEIVE money: 'request X USDC', 'create payment link', 'share a payment link', 'I want to receive X USDC', 'ödeme linki oluştur', 'X USDC almak istiyorum'. NEVER use for sending payments — that is create_payment.",
         parameters: {
             type: "object",
             properties: {
@@ -133,7 +132,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
     },
     {
         name: "show_pending_payments",
-        description: "Show currently pending (unconfirmed) payments",
+        description: "Show payments awaiting confirmation (pending/unconfirmed). Use for: 'pending payments', 'unconfirmed payments', 'bekleyen ödemelerim', 'onay bekleyen ödemeler'.",
         parameters: { type: "object", properties: { message: { type: "string", description: "Brief message to show" } } },
     },
     // === Vendors ===
@@ -186,7 +185,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
     },
     {
         name: "top_vendors",
-        description: "Show top vendors ranked by total USDC paid",
+        description: "Show top vendors ranked by total USDC paid. Use for: 'top vendors', 'who do I pay most?', 'en çok kime ödeme yaptım?', 'biggest vendors'. NOT the same as spending_by_vendor (which shows all vendors with amounts).",
         parameters: { type: "object", properties: { message: { type: "string", description: "Brief message" } } },
     },
     // === Wallet ===
@@ -207,7 +206,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
     },
     {
         name: "wallet_intelligence",
-        description: "Deep wallet analysis with on-chain DeFi insights and portfolio breakdown. Use only when user asks for detailed portfolio or activity analysis.",
+        description: "Deep wallet analysis with on-chain DeFi insights and portfolio breakdown. Use for: 'deep analysis', 'detailed portfolio', 'wallet intelligence', 'derinlemesine analiz', 'derin analiz', 'portföy analizi'. NOT for simple balance/address lookup — use show_wallet for that.",
         parameters: { type: "object", properties: { message: { type: "string", description: "Brief message" } } },
     },
     // === Analytics ===
@@ -222,13 +221,8 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         parameters: { type: "object", properties: { message: { type: "string", description: "Brief message" } } },
     },
     {
-        name: "payment_history",
-        description: "Show payment history",
-        parameters: { type: "object", properties: { message: { type: "string", description: "Brief message" } } },
-    },
-    {
         name: "show_recent_payments",
-        description: "Show the most recent payments (last 5-10). Also use for 'did it go through?' after a payment.",
+        description: "Show the most recent payments. Use for: 'recent payments', 'payment history', 'son ödemeler', 'son işlemler', 'did it go through?', 'was it sent?'.",
         parameters: { type: "object", properties: { message: { type: "string", description: "Brief message" } } },
     },
     {
@@ -243,23 +237,23 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
     },
     {
         name: "status",
-        description: "Show agent operations overview",
+        description: "Show a combined dashboard: wallet balance, active schedules, recent payments, and price alerts in one snapshot. Use for: 'genel durum', 'özet ver', 'her şeyin özeti', 'dashboard', 'what's going on?', 'everything status'.",
         parameters: { type: "object", properties: { message: { type: "string", description: "Brief message" } } },
     },
     // === Agent Identity ===
     {
         name: "agent_status",
-        description: "Show agent's on-chain ERC-8004 registration status, token ID, and identity. ONLY use for explicit queries about agent ID / token ID / on-chain identity. NEVER use for capability queries.",
+        description: "Show the agent's full ERC-8004 on-chain registration: token ID, registry addresses, registration state. Use for: 'agent token ID', 'ERC-8004 status', 'is the agent registered?', 'agent kayıtlı mı?', 'agent'ın token ID'si'. NEVER use for capability queries ('what can you do?').",
         parameters: { type: "object", properties: { message: { type: "string", description: "Brief message" } } },
     },
     {
         name: "agent_identity",
-        description: "Show agent identity details",
+        description: "Show the agent's on-chain owner wallet address and agent ID. Use for: 'who owns this agent?', 'agent sahibi kim?', 'agent ID nedir?', 'agent owner address'.",
         parameters: { type: "object", properties: { message: { type: "string", description: "Brief message" } } },
     },
     {
         name: "agent_validation_status",
-        description: "Show agent validation status on Arc",
+        description: "Show whether ArcPay Agent is validated/approved on Arc. Use for: 'is the agent validated?', 'agent onaylandı mı?', 'validation status', 'agent approved?'.",
         parameters: { type: "object", properties: { message: { type: "string", description: "Brief message" } } },
     },
     // === Live Research ===
@@ -282,7 +276,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
     },
     {
         name: "get_my_arc_activity",
-        description: "Show the user's on-chain activity on Arc Testnet",
+        description: "Show the user's on-chain transaction history directly from Arc Testnet blockchain. Use for: 'my Arc activity', 'on-chain transactions', 'Arc blockchain history', 'Arc'taki işlemlerim', 'blockchain aktivitem'. Different from payment_history (internal logs) — this shows actual on-chain data.",
         parameters: { type: "object", properties: { message: { type: "string", description: "Brief message" } } },
     },
     {
