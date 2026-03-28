@@ -399,7 +399,11 @@ export class Orchestrator {
             return;
         }
 
-        if (intent.message && typeof intent.message === "string"
+        // For create_payment, the engine always sends its own card with inline buttons.
+        // Never send the LLM's message field — it would appear as a buttonless duplicate
+        // (short "loading" text) or as a full fabricated review card (confusing the user).
+        if (intent.action !== "create_payment"
+            && intent.message && typeof intent.message === "string"
             && !Orchestrator.isFabricatedMessage(intent.action, intent.message)) {
             await this.bot.sendMessage(chatId, intent.message);
             this.memory.addBotMessage(chatId, intent.message);

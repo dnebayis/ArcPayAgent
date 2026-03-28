@@ -520,7 +520,10 @@ export class PaymentEngine {
         const nextStepsMsg = token === "EURC"
             ? `What happens next:\n• I’ll check your EURC balance\n• I’ll submit the transfer directly through Circle after you confirm`
             : `What happens next:\n• I’ll check your balance\n• I’ll check whether approval is needed\n• I’ll submit the payment through Circle after you confirm`;
-        const message = `Review payment\n\nAmount: **${amountStr} ${token}**\nRecipient: **${escapeTelegramMarkdown(displayRecipient)}**\nDestination: \`${resolvedBeneficiary}\`${memo ? `\nMemo: ${escapeTelegramMarkdown(memo)}` : ""}\n\n${nextStepsMsg}`;
+        // Use single-asterisk bold (*text*) — valid Telegram Markdown v1.
+        // Double-asterisk (**text**) is Markdown v2 syntax and causes a 400 parse error,
+        // which triggers the retry path and strips parse_mode (buttons may also be lost).
+        const message = `Review payment\n\nAmount: *${amountStr} ${token}*\nRecipient: *${escapeTelegramMarkdown(displayRecipient)}*\nDestination: \`${resolvedBeneficiary}\`${memo ? `\nMemo: ${escapeTelegramMarkdown(memo)}` : ""}\n\n${nextStepsMsg}`;
 
         const inlineKeyboard = [
             [
@@ -718,7 +721,7 @@ export class PaymentEngine {
                         payment.vendorName = updates.vendor;
                         payment.beneficiary = vendorAddress;
                     } else {
-                        this.sendAndNotify(chatId, `⚠️ I couldn't find **${escapeTelegramMarkdown(updates.vendor)}** in your address book.`, { parse_mode: "Markdown" });
+                        this.sendAndNotify(chatId, `⚠️ I couldn't find *${escapeTelegramMarkdown(updates.vendor)}* in your address book.`, { parse_mode: "Markdown" });
                         return;
                     }
                 }
@@ -732,7 +735,7 @@ export class PaymentEngine {
         const updNextSteps = updPayToken === "EURC"
             ? `What happens next:\n• I’ll check your EURC balance\n• I’ll submit the transfer directly through Circle after you confirm`
             : `What happens next:\n• I’ll check your balance\n• I’ll check whether approval is needed\n• I’ll submit the payment through Circle after you confirm`;
-        const message = `Payment updated\n\nAmount: **${payment.amountStr} ${updPayToken}**\nRecipient: **${escapeTelegramMarkdown(displayRecipient)}**\nDestination: \`${payment.beneficiary}\`${updatedMemo ? `\nMemo: ${escapeTelegramMarkdown(updatedMemo)}` : ""}\n\n${updNextSteps}`;
+        const message = `Payment updated\n\nAmount: *${payment.amountStr} ${updPayToken}*\nRecipient: *${escapeTelegramMarkdown(displayRecipient)}*\nDestination: \`${payment.beneficiary}\`${updatedMemo ? `\nMemo: ${escapeTelegramMarkdown(updatedMemo)}` : ""}\n\n${updNextSteps}`;
 
         const inlineKeyboard = [
             [
