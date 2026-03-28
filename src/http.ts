@@ -1,4 +1,5 @@
 import { createServer, Server } from "http";
+import type TelegramBot from "node-telegram-bot-api";
 import { getReadinessState, isAppReady } from "./appStatus";
 
 export interface HealthResponse {
@@ -56,5 +57,50 @@ export async function startHealthServer(port: number, host: string = "0.0.0.0"):
             server.off("error", reject);
             resolve(server);
         });
+    });
+}
+
+export function addTelegramWebhookHandler(
+    server: Server,
+    bot: TelegramBot,
+    secretToken?: string
+): void {
+    // We need to intercept requests to /telegram on an existing server.
+    // The cleanest way: replace the server's request listener.
+    const listeners = server.rawListeners("request");
+    server.removeAllListeners("request");
+
+    server.on("request", (req, res) => {
+        if (req.method === "POST" && req.url === "/telegram") {
+            // Verify secret token if provided
+            if (secretToken) {
+                const token = req.headers["x-telegram-bot-api-secret-token"];
+                if (token !== secretToken) {
+                    res.writeHead(403);
+                    res.end("Forbidden");
+                    return;
+                }
+            }
+
+            let body = "";
+            req.on("data", (chunk: Buffer) => { body += chunk.toString(); });
+            req.on("end", () => {
+                try {
+                    const update = JSON.parse(body);
+                    bot.processUpdate(update);
+                    res.writeHead(200, { "Content-Type": "text/plain" });
+                    res.end("ok");
+                } catch {
+                    res.writeHead(400);
+                    res.end("Bad Request");
+                }
+            });
+            return;
+        }
+
+        // Fall through to original health handlers
+        for (const listener of listeners) {
+            (listener as (req: unknown, res: unknown) => void)(req, res);
+        }
     });
 }

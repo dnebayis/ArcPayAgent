@@ -3,6 +3,9 @@
  * Remembers recent messages, last actions, and pending context.
  */
 
+import { loadStore, saveStore } from "../storage/persistence";
+import { EpisodicMemory } from "./episodicMemory";
+
 export type FlowStateName = "idle" | "payment_awaiting_confirmation" | "invoice_awaiting_override";
 
 export interface FlowState {
@@ -53,6 +56,16 @@ export interface ConversationContext {
     messages: { role: "user" | "assistant"; content: string }[];
 }
 
+interface PersistedCtx {
+    lastAction?: string;
+    lastPayment?: ConversationContext["lastPayment"];
+    lastInvoice?: ConversationContext["lastInvoice"];
+    lastSchedule?: ConversationContext["lastSchedule"];
+    lastVendor?: ConversationContext["lastVendor"];
+    flowState?: FlowState;
+    language?: string;
+}
+
 const MAX_MESSAGES = 30;
 /** When the buffer hits this size, oldest messages are compressed into a summary line. */
 const SUMMARIZE_THRESHOLD = 30;
@@ -60,6 +73,32 @@ const SUMMARIZE_KEEP = 20;
 
 export class ConversationMemory {
     private memory: Record<string, ConversationContext> = {};
+    private readonly episodic: EpisodicMemory;
+
+    constructor() {
+        const raw = loadStore<Record<string, PersistedCtx>>("conv_contexts.json");
+        // Pre-populate in-memory store from persisted data
+        for (const [id, persisted] of Object.entries(raw)) {
+            this.memory[id] = { messages: [], ...persisted };
+        }
+        this.episodic = new EpisodicMemory();
+    }
+
+    private persist(): void {
+        const toSave: Record<string, PersistedCtx> = {};
+        for (const [id, ctx] of Object.entries(this.memory)) {
+            toSave[id] = {
+                lastAction: ctx.lastAction,
+                lastPayment: ctx.lastPayment,
+                lastInvoice: ctx.lastInvoice,
+                lastSchedule: ctx.lastSchedule,
+                lastVendor: ctx.lastVendor,
+                flowState: ctx.flowState,
+                language: ctx.language,
+            };
+        }
+        saveStore("conv_contexts.json", toSave);
+    }
 
     private ensure(chatId: number): ConversationContext {
         const id = chatId.toString();
@@ -125,6 +164,7 @@ export class ConversationMemory {
         const ctx = this.ensure(chatId);
         ctx.lastInvoice = invoice;
         ctx.lastAction = "analyze_invoice";
+        this.persist();
     }
 
     /** Store the last payment prepared */
@@ -132,6 +172,7 @@ export class ConversationMemory {
         const ctx = this.ensure(chatId);
         ctx.lastPayment = { beneficiary, amount, token };
         ctx.lastAction = "create_payment";
+        this.persist();
     }
 
     /** Store the last schedule prepared */
@@ -139,26 +180,31 @@ export class ConversationMemory {
         const ctx = this.ensure(chatId);
         ctx.lastSchedule = { id, beneficiary, amount, scheduledFor };
         ctx.lastAction = "schedule_payment";
+        this.persist();
     }
 
     setLanguage(chatId: number, lang: string): void {
         if (!lang) return;
         this.ensure(chatId).language = lang;
+        this.persist();
     }
 
     setLastVendor(chatId: number, name: string, address?: string): void {
         const ctx = this.ensure(chatId);
         ctx.lastVendor = { name, address };
         ctx.lastAction = "vendor_detail";
+        this.persist();
     }
 
     /** Set lastAction */
     setLastAction(chatId: number, action: string): void {
         this.ensure(chatId).lastAction = action;
+        this.persist();
     }
 
     setFlowState(chatId: number, state: FlowState): void {
         this.ensure(chatId).flowState = state;
+        this.persist();
     }
 
     getFlowState(chatId: number): FlowState | undefined {
@@ -167,6 +213,7 @@ export class ConversationMemory {
 
     clearFlowState(chatId: number): void {
         this.ensure(chatId).flowState = undefined;
+        this.persist();
     }
 
     /**
@@ -183,6 +230,7 @@ export class ConversationMemory {
         ctx.lastSchedule = undefined;
         ctx.lastVendor = undefined;
         this.clearFlowState(chatId);
+        this.persist();
     }
 
     /** Get full context for the user */
@@ -197,11 +245,18 @@ export class ConversationMemory {
     clearContext(chatId: number): void {
         const id = chatId.toString();
         delete this.memory[id];
+        this.episodic.closeActiveSession(chatId);
+        this.persist();
     }
 
     /** Get conversation history formatted for LLM */
     getHistory(chatId: number): { role: "user" | "assistant"; content: string }[] {
         return this.ensure(chatId).messages;
+    }
+
+    /** Record an episodic event for the user */
+    recordEpisodicEvent(chatId: number, event: string): void {
+        this.episodic.record(chatId, event);
     }
 
     /** Build a context summary string for the LLM */
@@ -255,6 +310,9 @@ export class ConversationMemory {
         if (ctx.flowState && ctx.flowState.name !== "idle") {
             parts.push(`[Flow state: ${ctx.flowState.name}]`);
         }
+
+        const episodicCtx = this.episodic.getContextString(chatId);
+        if (episodicCtx) parts.push(episodicCtx);
 
         return "\n\nCurrent context:\n" + parts.join("\n");
     }

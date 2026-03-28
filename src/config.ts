@@ -34,6 +34,8 @@ const productionSchema = z.object({
     /** Comma-separated Telegram chat IDs that may use the bot. Empty = open to all. */
     ALLOWED_CHAT_IDS: z.string().trim().optional().default(""),
     USE_TOOL_CALLING: z.string().optional().default("").transform(v => v === "true"),
+    WEBHOOK_URL: z.string().trim().optional().default(""),
+    WEBHOOK_SECRET: z.string().trim().optional().default(""),
 });
 
 const testSchema = z.object({
@@ -58,6 +60,8 @@ const testSchema = z.object({
     ERC8004_VALIDATION_REGISTRY_ADDRESS: optionalString(),
     ALLOWED_CHAT_IDS: z.string().trim().optional().default(""),
     USE_TOOL_CALLING: z.string().optional().default("").transform(v => v === "true"),
+    WEBHOOK_URL: z.string().trim().optional().default(""),
+    WEBHOOK_SECRET: z.string().trim().optional().default(""),
 });
 
 export type RuntimeConfig = z.infer<typeof productionSchema>;

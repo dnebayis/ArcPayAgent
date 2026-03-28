@@ -1,3 +1,5 @@
+import { logger } from "../utils/logger";
+
 export interface LLMAuthConfig {
     provider: string;
     key: string;
@@ -97,6 +99,7 @@ function getOpenAICompatibleConfig(auth: LLMAuthConfig): OpenAICompatibleConfig 
 
 async function callOpenAICompatible(auth: LLMAuthConfig, messages: LLMJsonMessage[]): Promise<string | null> {
     const config = getOpenAICompatibleConfig(auth);
+    const start = Date.now();
     const response = await postJsonWithRetry(config.apiUrl, {
         method: "POST",
         headers: {
@@ -122,10 +125,20 @@ async function callOpenAICompatible(auth: LLMAuthConfig, messages: LLMJsonMessag
     }
 
     const data = await response.json();
+    const usage = data.usage ?? {};
+    logger.info(null, "[LLM] Request completed", {
+        provider: auth.provider,
+        model: config.model,
+        promptTokens: usage.prompt_tokens ?? 0,
+        completionTokens: usage.completion_tokens ?? 0,
+        totalTokens: usage.total_tokens ?? 0,
+        latencyMs: Date.now() - start,
+    });
     return data.choices?.[0]?.message?.content || null;
 }
 
 async function callAnthropic(auth: LLMAuthConfig, systemContent: string, messages: LLMJsonMessage[]): Promise<string | null> {
+    const start = Date.now();
     const response = await postJsonWithRetry("https://api.anthropic.com/v1/messages", {
         method: "POST",
         headers: {
@@ -157,11 +170,21 @@ async function callAnthropic(auth: LLMAuthConfig, systemContent: string, message
     }
 
     const data = await response.json();
+    const usage = data.usage ?? {};
+    logger.info(null, "[LLM] Request completed", {
+        provider: "anthropic",
+        model: auth.model || "claude-3-5-sonnet-latest",
+        promptTokens: usage.input_tokens ?? 0,
+        completionTokens: usage.output_tokens ?? 0,
+        totalTokens: (usage.input_tokens ?? 0) + (usage.output_tokens ?? 0),
+        latencyMs: Date.now() - start,
+    });
     return data.content?.find((item: any) => item?.type === "text")?.text || null;
 }
 
 async function callGemini(auth: LLMAuthConfig, systemContent: string, messages: LLMJsonMessage[]): Promise<string | null> {
     const model = auth.model || "gemini-2.0-flash";
+    const start = Date.now();
     const response = await postJsonWithRetry(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
         method: "POST",
         headers: {
@@ -195,6 +218,15 @@ async function callGemini(auth: LLMAuthConfig, systemContent: string, messages: 
     }
 
     const data = await response.json();
+    const usage = data.usageMetadata ?? {};
+    logger.info(null, "[LLM] Request completed", {
+        provider: "gemini",
+        model: auth.model || "gemini-2.0-flash",
+        promptTokens: usage.promptTokenCount ?? 0,
+        completionTokens: usage.candidatesTokenCount ?? 0,
+        totalTokens: usage.totalTokenCount ?? 0,
+        latencyMs: Date.now() - start,
+    });
     return data.candidates?.[0]?.content?.parts?.find((item: any) => typeof item?.text === "string")?.text || null;
 }
 
@@ -206,6 +238,7 @@ async function callOpenAICompatibleWithTools(
     tools: import("./toolDefinitions").ToolDefinition[]
 ): Promise<ToolCallResponse | null> {
     const config = getOpenAICompatibleConfig(auth);
+    const start = Date.now();
 
     // Format messages: tool messages are passed as-is (OpenAI supports role:"tool")
     const formattedMessages = messages.map(m => {
@@ -245,7 +278,17 @@ async function callOpenAICompatibleWithTools(
             };
             finish_reason?: string;
         }>;
+        usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
     };
+    const toolUsage = (data as any).usage ?? {};
+    logger.info(null, "[LLM] Request completed", {
+        provider: auth.provider,
+        model: config.model,
+        promptTokens: toolUsage.prompt_tokens ?? 0,
+        completionTokens: toolUsage.completion_tokens ?? 0,
+        totalTokens: toolUsage.total_tokens ?? 0,
+        latencyMs: Date.now() - start,
+    });
     const choice = data.choices?.[0];
     if (!choice?.message) return null;
 
@@ -274,6 +317,7 @@ async function callAnthropicWithTools(
     messages: AgentMessage[],
     tools: import("./toolDefinitions").ToolDefinition[]
 ): Promise<ToolCallResponse | null> {
+    const start = Date.now();
     const { toAnthropicTools } = await import("./toolDefinitions");
 
     // Separate system message from conversation messages
@@ -321,7 +365,17 @@ async function callAnthropicWithTools(
     const data = await response.json() as {
         content?: Array<{ type: string; text?: string; id?: string; name?: string; input?: Record<string, unknown> }>;
         stop_reason?: string;
+        usage?: { input_tokens?: number; output_tokens?: number };
     };
+    const anthropicUsage = data.usage ?? {};
+    logger.info(null, "[LLM] Request completed", {
+        provider: "anthropic",
+        model: auth.model || "claude-3-5-sonnet-latest",
+        promptTokens: anthropicUsage.input_tokens ?? 0,
+        completionTokens: anthropicUsage.output_tokens ?? 0,
+        totalTokens: (anthropicUsage.input_tokens ?? 0) + (anthropicUsage.output_tokens ?? 0),
+        latencyMs: Date.now() - start,
+    });
 
     const textBlock = data.content?.find(b => b.type === "text");
     const toolUseBlock = data.content?.find(b => b.type === "tool_use");
@@ -347,6 +401,7 @@ async function callGeminiWithTools(
     messages: AgentMessage[],
     tools: import("./toolDefinitions").ToolDefinition[]
 ): Promise<ToolCallResponse | null> {
+    const start = Date.now();
     const { toGeminiFunctions } = await import("./toolDefinitions");
 
     const model = auth.model || "gemini-2.0-flash";
@@ -397,7 +452,17 @@ async function callGeminiWithTools(
                 parts?: Array<{ text?: string; functionCall?: { name: string; args?: Record<string, unknown> } }>;
             };
         }>;
+        usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number; totalTokenCount?: number };
     };
+    const geminiToolUsage = data.usageMetadata ?? {};
+    logger.info(null, "[LLM] Request completed", {
+        provider: "gemini",
+        model: auth.model || "gemini-2.0-flash",
+        promptTokens: geminiToolUsage.promptTokenCount ?? 0,
+        completionTokens: geminiToolUsage.candidatesTokenCount ?? 0,
+        totalTokens: geminiToolUsage.totalTokenCount ?? 0,
+        latencyMs: Date.now() - start,
+    });
 
     const parts = data.candidates?.[0]?.content?.parts ?? [];
     const functionCallPart = parts.find(p => p.functionCall);

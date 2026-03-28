@@ -93,7 +93,9 @@ export async function main() {
     console.log("Starting Arc Pay Agent...");
     const isTest = process.env.NODE_ENV === "test";
     const config = loadRuntimeConfig(process.env, { isTest });
-    const shouldStartPolling = !isTest;
+    const webhookUrl = config.WEBHOOK_URL;
+    const webhookSecret = config.WEBHOOK_SECRET;
+    const shouldStartPolling = !isTest && !webhookUrl;
     const shouldStartScheduler = !isTest;
     const shouldStartHttp = !isTest && process.env.HEALTH_SERVER_ENABLED !== "false";
     const healthServerRequired = process.env.HEALTH_SERVER_REQUIRED === "true" || process.env.NODE_ENV === "production";
@@ -164,7 +166,25 @@ export async function main() {
     }
 
     // ── Infrastructure ──────────────────────────────────────────────────────
-    const bot = createBot(token || "mock-token", shouldStartPolling && !!token);
+    const bot = createBot(token || "mock-token", shouldStartPolling && !!token && !webhookUrl);
+
+    // ── Webhook setup ────────────────────────────────────────────────────────
+    let usingWebhook = false;
+    if (webhookUrl && !isTest) {
+        usingWebhook = true;
+        const fullWebhookUrl = webhookUrl.endsWith("/telegram")
+            ? webhookUrl
+            : `${webhookUrl}/telegram`;
+        try {
+            await bot.setWebHook(fullWebhookUrl, {
+                secret_token: webhookSecret || undefined,
+                max_connections: 100,
+            });
+            console.log(`[Bot] Webhook registered: ${fullWebhookUrl}`);
+        } catch (err: any) {
+            console.error(`[Bot] Failed to set webhook: ${err.message}`);
+        }
+    }
 
     const circleClient = new CircleClient(circleApiKey, circleEntitySecret, circleWalletSetId, circleApiUrl);
     const walletStore = new WalletStore(circleClient);
@@ -377,10 +397,16 @@ export async function main() {
 
     console.log("Bot initialized!");
 
+    let server: import("http").Server | null = null;
     if (shouldStartHttp) {
         try {
-            await startHealthServer(port);
+            server = await startHealthServer(port);
             console.log(`[HTTP] Health server listening on port ${port}`);
+            if (usingWebhook && server) {
+                const { addTelegramWebhookHandler } = await import("./http");
+                addTelegramWebhookHandler(server, bot, webhookSecret || undefined);
+                console.log(`[Bot] Webhook handler active at /telegram`);
+            }
         } catch (error) {
             if (isRecoverableHealthServerError(error, { required: healthServerRequired })) {
                 console.warn(`[HTTP] Port ${port} is already in use. Continuing without a local health server.`);

@@ -64,6 +64,7 @@ export class ToolDispatcher {
                 const token = (intent.token === "EURC") ? "EURC" : "USDC";
                 await paymentEngine.preparePayment(chatId, beneficiary, amount, intent.memo ? String(intent.memo) : "ArcPay", { origin: "byok", token });
                 if (beneficiary) memory.setLastPayment(chatId, beneficiary, String(amount), token);
+                memory.recordEpisodicEvent(chatId, `initiated payment: ${amount} ${token} to ${beneficiary}`);
                 return `Payment card prepared for ${amount} ${token} to ${beneficiary}. Awaiting confirmation.`;
             }
 
@@ -78,7 +79,11 @@ export class ToolDispatcher {
                     return "";
                 }
                 const scheduleToken = (intent.token === "EURC") ? "EURC" : "USDC";
+                const frequency = (["once", "weekly", "monthly"].includes(String(intent.frequency || ""))
+                    ? intent.frequency as string
+                    : "once");
                 await this.createSchedule(chatId, beneficiary, amount, intent);
+                memory.recordEpisodicEvent(chatId, `scheduled payment: ${amount} ${scheduleToken} to ${beneficiary} (${frequency})`);
                 return `Schedule created for ${amount} ${scheduleToken} to ${beneficiary}.`;
             }
 
@@ -144,6 +149,7 @@ export class ToolDispatcher {
                 }
                 await vendorStore.saveVendor(chatId, name, address);
                 memory.setLastVendor(chatId, name, address);
+                memory.recordEpisodicEvent(chatId, `saved vendor: ${name} (${address})`);
                 await this.reply(chatId, `✅ Vendor **${escapeTelegramMarkdown(name)}** saved with address \`${address}\`.`, { parse_mode: "Markdown" });
                 return `Vendor ${name} saved.`;
             }
@@ -171,6 +177,7 @@ export class ToolDispatcher {
                     return "";
                 }
                 const removed = await vendorStore.removeVendor(chatId, name);
+                if (removed) memory.recordEpisodicEvent(chatId, `removed vendor: ${name}`);
                 await this.reply(chatId, removed
                     ? `✅ Vendor **${escapeTelegramMarkdown(name)}** removed.`
                     : `Vendor **${escapeTelegramMarkdown(name)}** not found.`,
@@ -223,6 +230,7 @@ export class ToolDispatcher {
                 try {
                     await this.reply(chatId, "Creating your wallet on Arc Testnet...");
                     const address = await walletStore.createWallet(chatId);
+                    memory.recordEpisodicEvent(chatId, `created wallet`);
                     await this.reply(chatId,
                         `✅ **Wallet Created**\n\nAddress: \`${address}\`\n\nYou can now receive and send USDC on Arc Testnet.`,
                         { parse_mode: "Markdown" }
@@ -393,6 +401,7 @@ export class ToolDispatcher {
                 }
 
                 const alert = alertStore.createAlert(chatId, symbol, alertPrice, direction);
+                memory.recordEpisodicEvent(chatId, `set price alert: ${symbol} ${direction} $${alertPrice}`);
                 const dirWord = direction === "above" ? "rises above" : "drops below";
                 await this.reply(chatId,
                     `🔔 **Price alert set**\n\nI'll notify you when **${symbol}** ${dirWord} $${alertPrice.toLocaleString("en-US")}.\nAlert ID: \`${alert.id}\``,
