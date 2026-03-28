@@ -18,13 +18,42 @@ export interface ToolDefinition {
 /** Actions where the dispatcher handles the full UX (inline keyboards etc.).
  *  After executing these, the agent loop does NOT attempt a synthesis step. */
 export const TERMINAL_ACTIONS = new Set([
+    // Payment flow — two-step confirm UI; loop must stop here
     "create_payment",
     "create_wallet",
     "create_payment_request",
+    // Research — fetch + display inline; no follow-up tool needed
     "get_crypto_prices",
     "get_arc_network_stats",
     "get_my_arc_activity",
     "get_fx_rate",
+    // Write actions — send their own confirmation message; no chaining needed
+    "schedule_payment",
+    "cancel_schedule",
+    "cancel_all_schedules",
+    "save_vendor",
+    "remove_vendor",
+    // Data-display actions — engine sends formatted message directly; loop must stop here
+    // to prevent the LLM generating a second (fabricated) response
+    "list_schedules",
+    "list_vendors",
+    "show_wallet",
+    "wallet_intelligence",
+    "monthly_spending",
+    "payment_history",
+    "show_recent_payments",
+    "report",
+    "spending_by_vendor",
+    "top_vendors",
+    "account_summary",
+    "vendor_detail",
+    "show_pending_payments",
+    "status",
+    "agent_status",
+    "agent_identity",
+    "agent_validation_status",
+    "watch_payments_status",
+    "list_price_alerts",
 ]);
 
 export const TOOL_DEFINITIONS: ToolDefinition[] = [
@@ -46,7 +75,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
     },
     {
         name: "schedule_payment",
-        description: "Schedule a one-time or recurring USDC/EURC payment",
+        description: "Schedule a one-time or recurring USDC/EURC payment. The schedule is created IMMEDIATELY — there is NO confirmation step. Do NOT write a review card or say 'use the Confirm button'. Just say e.g. 'Scheduling X USDC to Y for Z.'",
         parameters: {
             type: "object",
             properties: {

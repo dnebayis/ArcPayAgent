@@ -87,7 +87,9 @@ export class ToolDispatcher {
                 const frequency = (["once", "weekly", "monthly"].includes(String(intent.frequency || ""))
                     ? intent.frequency as string
                     : "once");
-                await this.createSchedule(chatId, beneficiary, amount, intent);
+                const scheduled = await this.createSchedule(chatId, beneficiary, amount, intent);
+                // createSchedule returns false when it exits early (vendor not found, etc.)
+                if (!scheduled) return "";
                 memory.recordEpisodicEvent(chatId, `scheduled payment: ${amount} ${scheduleToken} to ${beneficiary} (${frequency})`);
                 return `Schedule created for ${amount} ${scheduleToken} to ${beneficiary}.`;
             }
@@ -487,7 +489,7 @@ export class ToolDispatcher {
         beneficiary: string,
         amount: number,
         intent: ParsedIntent
-    ): Promise<void> {
+    ): Promise<boolean> {
         const { vendorStore, scheduleStore, userPreferencesStore, memory } = this.deps;
 
         const isDirectAddress = ethers.isAddress(beneficiary);
@@ -495,7 +497,7 @@ export class ToolDispatcher {
 
         if (!scheduleAddress) {
             await this.reply(chatId, `❌ Vendor **${escapeTelegramMarkdown(beneficiary)}** not found. Save it first with \`save vendor ${beneficiary} 0x...\`, or use a full wallet address.`, { parse_mode: "Markdown" });
-            return;
+            return false;
         }
 
         const timeInput = intent.schedule_time ? String(intent.schedule_time) : "";
@@ -517,5 +519,6 @@ export class ToolDispatcher {
 
         const msg = `✅ **Scheduled payment created**\n\nAmount: ${schedule.amount} ${schedule.token ?? "USDC"}\nRecipient: **${escapeTelegramMarkdown(schedule.vendor)}**\nExecution: ${formatUserDateTime(schedule.nextExecution, preferences)}\nFrequency: ${schedule.frequency}\nID: \`${schedule.id}\``;
         await this.reply(chatId, msg, { parse_mode: "Markdown" });
+        return true;
     }
 }

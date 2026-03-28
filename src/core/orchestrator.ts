@@ -175,6 +175,7 @@ export class Orchestrator {
             ...history,
             { role: "user", content: text },
         ];
+        let lastDispatchedTool: string | undefined;
 
         void this.bot.sendChatAction(chatId, "typing").catch(() => { });
         const typingInterval = setInterval(() => {
@@ -197,9 +198,13 @@ export class Orchestrator {
                     toolName: toolResp.toolName, finishReason: toolResp.finishReason
                 });
 
-                // LLM decided not to call a tool — just a conversational response
+                // LLM decided not to call a tool — just a conversational response.
+                // Apply the same fabrication guard as pre-tool messages so data-display
+                // tools that didn't make the TERMINAL_ACTIONS list can't generate a
+                // second fake response in a follow-up "stop" turn.
                 if (!toolResp.toolName || toolResp.finishReason === "stop") {
-                    if (toolResp.message) {
+                    if (toolResp.message
+                        && !Orchestrator.isFabricatedMessage(lastDispatchedTool, toolResp.message)) {
                         await this.bot.sendMessage(chatId, toolResp.message);
                         this.memory.addBotMessage(chatId, toolResp.message);
                     }
@@ -253,6 +258,9 @@ export class Orchestrator {
                     await this.bot.sendMessage(chatId, "Something went wrong. Please try again.");
                     break;
                 }
+
+                // Track last dispatched tool for fabrication guard in stop-branch
+                lastDispatchedTool = toolResp.toolName;
 
                 // Update flow state — only set payment_awaiting_confirmation when a card was
                 // actually shown (empty toolResult means preparePayment returned early with an error).
