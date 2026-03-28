@@ -2,13 +2,15 @@ import TelegramBot from "node-telegram-bot-api";
 import { randomUUID } from "node:crypto";
 import { ConversationMemory } from "../agent/conversationMemory";
 import { LLMKeyStore } from "../storage/llmKeyStore";
-import { requestJsonCompletion, LLMJsonMessage } from "../ai/llmJsonClient";
-import { buildSystemPrompt } from "../ai/systemPrompt";
+import { requestJsonCompletion, requestToolCompletion, LLMJsonMessage, AgentMessage } from "../ai/llmJsonClient";
+import { buildSystemPrompt, buildSlimSystemPrompt } from "../ai/systemPrompt";
+import { TOOL_DEFINITIONS, TERMINAL_ACTIONS } from "../ai/toolDefinitions";
 import { ResearchTools, ResearchData } from "../tools/researchTools";
 import { WalletStore } from "../storage/walletStore";
-import { sanitizeForTelegram } from "../utils/telegramMarkdown";
 import { validateIntent } from "../ai/intentValidator";
 import { logger } from "../utils/logger";
+
+const MAX_AGENT_ITERATIONS = 4;
 
 const SYNTHESIS_PROMPT = `You are a helpful AI assistant. You have fetched live data to answer the user's query.
 Synthesize the provided data into a natural, readable response. Be informative but brief.
@@ -36,14 +38,19 @@ export interface ParsedIntent {
 }
 
 export class Orchestrator {
+    private readonly useToolCalling: boolean;
+
     constructor(
         private bot: TelegramBot,
         private llmKeyStore: LLMKeyStore,
         private memory: ConversationMemory,
         private walletStore: WalletStore,
         private researchTools: ResearchTools,
-        private dispatchFn: (chatId: number, intent: ParsedIntent) => Promise<void>
-    ) { }
+        private dispatchFn: (chatId: number, intent: ParsedIntent) => Promise<string>,
+        useToolCalling = false
+    ) {
+        this.useToolCalling = useToolCalling;
+    }
 
     /**
      * Confirmation words that mean "approve the pending payment" — not a new command.
@@ -64,7 +71,6 @@ export class Orchestrator {
 
     /**
      * Capability queries — intercepted before the LLM to prevent agent_status misrouting.
-     * "what can you do?", "create a detailed list of your features", etc.
      */
     private static readonly CAPABILITY_PATTERN = /\bwhat\s+(can|do)\s+you\b|\bwhat\s+are\s+you\b|\b(list|show|give|create)\b.{0,40}\b(what\s+you\s+can|capabilities|features|functions|abilities)\b|\bdetailed\s+list\b|\byour\s+(capabilities|features|functions|abilities)\b/i;
 
@@ -76,10 +82,14 @@ export class Orchestrator {
         const traceId = randomUUID().slice(0, 8);
         this.memory.addUserMessage(chatId, text);
 
-        // ── Pending-payment guard ──────────────────────────────────────────────
-        // When a payment card is on-screen, intercept text before it reaches the LLM.
+        // ── Flow state guard ────────────────────────────────────────────────────
+        // Use explicit flow state (2.3) when available, fall back to lastAction for backward compat
+        const flowState = this.memory.getFlowState(chatId);
         const lastAction = this.memory.getContext(chatId).lastAction;
-        if (lastAction === "create_payment") {
+        const isPendingPayment = flowState?.name === "payment_awaiting_confirmation"
+            || lastAction === "create_payment";
+
+        if (isPendingPayment) {
             const trimmed = text.trim();
             if (Orchestrator.CONFIRM_PATTERN.test(trimmed)) {
                 const msg = "Please use the **Confirm** button above to complete the payment, or **Cancel** to cancel it.";
@@ -93,9 +103,6 @@ export class Orchestrator {
                 this.memory.addBotMessage(chatId, msg);
                 return;
             }
-            // Guard B: payment correction / modification attempt while payment is pending.
-            // "not 1 eurc send 10 eurc", "actually make it 50 usdc" etc. must not silently
-            // overwrite the pending payment — tell the user to cancel first.
             if (Orchestrator.PAYMENT_MODIFY_PATTERN.test(trimmed)) {
                 const msg = "There's already a payment waiting for confirmation. Please use the **Cancel** button above to cancel it first, then I can process your new request.";
                 await this.bot.sendMessage(chatId, msg, { parse_mode: "Markdown" });
@@ -105,8 +112,6 @@ export class Orchestrator {
         }
 
         // ── Capability query guard ─────────────────────────────────────────────
-        // Intercept "what can you do?" / "create a detailed list" etc. before the LLM
-        // to prevent misrouting to agent_status.
         if (Orchestrator.CAPABILITY_PATTERN.test(text.trim())) {
             await this.bot.sendMessage(chatId, Orchestrator.CAPABILITY_MESSAGE);
             this.memory.addBotMessage(chatId, Orchestrator.CAPABILITY_MESSAGE);
@@ -120,9 +125,140 @@ export class Orchestrator {
             return;
         }
 
+        if (this.useToolCalling) {
+            await this.handleMessageWithTools(chatId, text, auth, traceId);
+        } else {
+            await this.handleMessageWithJson(chatId, text, auth, traceId);
+        }
+    }
+
+    /** NEW: agent loop using native tool calling (USE_TOOL_CALLING=true) */
+    private async handleMessageWithTools(
+        chatId: number,
+        text: string,
+        auth: { provider: string; key: string; model?: string },
+        traceId: string
+    ): Promise<void> {
         const context = this.memory.buildContextSummary(chatId);
         const history = this.memory.getHistory(chatId).slice(-100);
+        const systemContent = buildSlimSystemPrompt(context);
 
+        const loopMessages: AgentMessage[] = [
+            { role: "system", content: systemContent },
+            ...history,
+            { role: "user", content: text },
+        ];
+
+        void this.bot.sendChatAction(chatId, "typing").catch(() => { });
+        const typingInterval = setInterval(() => {
+            void this.bot.sendChatAction(chatId, "typing").catch(() => { });
+        }, 4000);
+
+        try {
+            for (let iter = 0; iter < MAX_AGENT_ITERATIONS; iter++) {
+                const llmStart = Date.now();
+                const toolResp = await requestToolCompletion(auth, loopMessages, TOOL_DEFINITIONS);
+
+                if (!toolResp) {
+                    const errMsg = "I'm having trouble connecting right now. Please try again in a moment.";
+                    await this.bot.sendMessage(chatId, errMsg);
+                    return;
+                }
+
+                logger.info(traceId, "[Orchestrator] Tool call response", {
+                    chatId, iter, latencyMs: Date.now() - llmStart,
+                    toolName: toolResp.toolName, finishReason: toolResp.finishReason
+                });
+
+                // LLM decided not to call a tool — just a conversational response
+                if (!toolResp.toolName || toolResp.finishReason === "stop") {
+                    if (toolResp.message) {
+                        await this.bot.sendMessage(chatId, toolResp.message);
+                        this.memory.addBotMessage(chatId, toolResp.message);
+                    }
+                    break;
+                }
+
+                // Tool call — send pre-tool message if any
+                if (toolResp.message) {
+                    await this.bot.sendMessage(chatId, toolResp.message);
+                    this.memory.addBotMessage(chatId, toolResp.message);
+                }
+
+                // Handle research actions via existing research path
+                if (this.researchTools.isResearchAction(toolResp.toolName)) {
+                    const intent: ParsedIntent = {
+                        action: toolResp.toolName,
+                        message: toolResp.message,
+                        ...(toolResp.toolArgs as object)
+                    };
+                    await this.handleResearch(chatId, intent, text, auth);
+                    break;
+                }
+
+                // Build intent and dispatch
+                const intent: ParsedIntent = {
+                    action: toolResp.toolName,
+                    message: toolResp.message,
+                    ...(toolResp.toolArgs as object)
+                };
+
+                // Guard: missing amount for create_payment
+                if (intent.action === "create_payment") {
+                    const amount = Number(intent.amount);
+                    if (!intent.amount || isNaN(amount) || amount <= 0) {
+                        const tok = (intent.token as string) ?? "USDC";
+                        const ben = intent.beneficiary ? ` to ${String(intent.beneficiary)}` : "";
+                        const msg = `How much ${tok} would you like to send${ben}?`;
+                        await this.bot.sendMessage(chatId, msg);
+                        this.memory.addBotMessage(chatId, msg);
+                        break;
+                    }
+                }
+
+                let toolResult: string;
+                try {
+                    toolResult = await this.dispatchFn(chatId, intent);
+                } catch (error: unknown) {
+                    const errMsg = error instanceof Error ? error.message : String(error);
+                    logger.error(traceId, "[Orchestrator] Dispatch error", { chatId, action: toolResp.toolName, error: errMsg });
+                    await this.bot.sendMessage(chatId, "Something went wrong. Please try again.");
+                    break;
+                }
+
+                // Update flow state
+                if (toolResp.toolName === "create_payment") {
+                    this.memory.setFlowState(chatId, { name: "payment_awaiting_confirmation", since: Date.now() });
+                } else {
+                    this.memory.setLastAction(chatId, toolResp.toolName);
+                }
+
+                // Add tool interaction to loop messages for potential next iteration
+                const assistantContent = toolResp.message
+                    ? `${toolResp.message}\n[Called: ${toolResp.toolName}]`
+                    : `[Called: ${toolResp.toolName}]`;
+                loopMessages.push({ role: "assistant", content: assistantContent });
+                loopMessages.push({ role: "user", content: `[Tool result: ${toolResult || "Done."}]` });
+
+                // If this tool handles its own full UX, stop looping
+                if (TERMINAL_ACTIONS.has(toolResp.toolName)) break;
+
+                // Otherwise continue — LLM may want to chain another action
+            }
+        } finally {
+            clearInterval(typingInterval);
+        }
+    }
+
+    /** EXISTING: single-shot JSON mode (default, backward compatible) */
+    private async handleMessageWithJson(
+        chatId: number,
+        text: string,
+        auth: { provider: string; key: string; model?: string },
+        traceId: string
+    ): Promise<void> {
+        const context = this.memory.buildContextSummary(chatId);
+        const history = this.memory.getHistory(chatId).slice(-100);
         const systemContent = buildSystemPrompt(context);
 
         const messages: LLMJsonMessage[] = [
@@ -131,7 +267,6 @@ export class Orchestrator {
             { role: "user", content: text }
         ];
 
-        // Keep typing indicator alive while LLM processes (Telegram clears it after ~5s)
         void this.bot.sendChatAction(chatId, "typing").catch(() => { });
         const typingInterval = setInterval(() => {
             void this.bot.sendChatAction(chatId, "typing").catch(() => { });
@@ -141,8 +276,9 @@ export class Orchestrator {
         const llmStart = Date.now();
         try {
             raw = await requestJsonCompletion(auth, messages);
-        } catch (error: any) {
-            logger.error(traceId, "[Orchestrator] LLM call failed", { chatId, error: error.message });
+        } catch (error: unknown) {
+            const errMsg = error instanceof Error ? error.message : String(error);
+            logger.error(traceId, "[Orchestrator] LLM call failed", { chatId, error: errMsg });
         } finally {
             clearInterval(typingInterval);
         }
@@ -157,11 +293,9 @@ export class Orchestrator {
 
         let intent: ParsedIntent;
         try {
-            const parsed = JSON.parse(raw);
+            const parsed = JSON.parse(raw) as unknown;
             const validated = validateIntent(parsed);
-            if (!validated) {
-                throw new Error("Intent validation failed");
-            }
+            if (!validated) throw new Error("Intent validation failed");
             intent = validated;
         } catch {
             logger.warn(traceId, "[Orchestrator] Failed to parse/validate LLM response", { chatId, raw: raw?.substring(0, 200) });
@@ -171,9 +305,7 @@ export class Orchestrator {
             return;
         }
 
-        // ── Guard C: missing amount for create_payment ────────────────────────
-        // LLM sometimes invents amounts or silently reuses lastPayment context.
-        // Enforce that amount is always explicitly provided before dispatching.
+        // Guard: missing amount for create_payment
         if (intent.action === "create_payment") {
             const amount = Number(intent.amount);
             if (!intent.amount || isNaN(amount) || amount <= 0) {
@@ -182,12 +314,11 @@ export class Orchestrator {
                 const msg = `How much ${token} would you like to send${beneficiary}?`;
                 await this.bot.sendMessage(chatId, msg);
                 this.memory.addBotMessage(chatId, msg);
-                return; // do NOT dispatch, do NOT update lastAction
+                return;
             }
         }
 
         if (!intent.action) {
-            // No action — send the conversational message directly
             if (intent.message && typeof intent.message === "string") {
                 await this.bot.sendMessage(chatId, intent.message);
                 this.memory.addBotMessage(chatId, intent.message);
@@ -195,7 +326,6 @@ export class Orchestrator {
             return;
         }
 
-        // Handle research actions (send status message first, then fetch + synthesize)
         if (this.researchTools.isResearchAction(intent.action)) {
             if (intent.message && typeof intent.message === "string") {
                 await this.bot.sendMessage(chatId, intent.message);
@@ -205,7 +335,6 @@ export class Orchestrator {
             return;
         }
 
-        // Send the LLM's conversational message before dispatching the action
         if (intent.message && typeof intent.message === "string") {
             await this.bot.sendMessage(chatId, intent.message);
             this.memory.addBotMessage(chatId, intent.message);
@@ -213,9 +342,14 @@ export class Orchestrator {
 
         try {
             await this.dispatchFn(chatId, intent);
-            this.memory.setLastAction(chatId, intent.action!);
-        } catch (error: any) {
-            console.error(`[Orchestrator] Dispatch error for action ${intent.action}:`, error.message);
+            if (intent.action === "create_payment") {
+                this.memory.setFlowState(chatId, { name: "payment_awaiting_confirmation", since: Date.now() });
+            } else {
+                this.memory.setLastAction(chatId, intent.action!);
+            }
+        } catch (error: unknown) {
+            const errMsg = error instanceof Error ? error.message : String(error);
+            console.error(`[Orchestrator] Dispatch error for action ${intent.action}:`, errMsg);
             await this.bot.sendMessage(chatId, "Something went wrong. Please try again.");
         }
     }
@@ -245,16 +379,15 @@ export class Orchestrator {
 
         const synthRaw = await requestJsonCompletion(auth, synthesisMessages).catch(() => null);
 
-        let resultMsg = formattedData; // fallback to raw data
+        let resultMsg = formattedData;
         if (synthRaw) {
             try {
-                const { message } = JSON.parse(synthRaw);
-                if (message) resultMsg = message;
+                const parsed = JSON.parse(synthRaw) as { message?: string };
+                if (parsed.message) resultMsg = parsed.message;
             } catch { /* use fallback */ }
         }
 
         await this.bot.sendMessage(chatId, resultMsg);
         this.memory.addBotMessage(chatId, resultMsg);
     }
-
 }

@@ -3,6 +3,14 @@
  * Remembers recent messages, last actions, and pending context.
  */
 
+export type FlowStateName = "idle" | "payment_awaiting_confirmation" | "invoice_awaiting_override";
+
+export interface FlowState {
+    name: FlowStateName;
+    since: number;
+    paymentId?: string;
+}
+
 export interface ConversationContext {
     /** Last invoice that was analyzed */
     lastInvoice?: {
@@ -37,6 +45,8 @@ export interface ConversationContext {
     };
     /** Last action the bot took */
     lastAction?: string;
+    /** Explicit flow state for the current conversation turn */
+    flowState?: FlowState;
     /** User's language code from Telegram (e.g. "tr", "en", "de") */
     language?: string;
     /** Recent conversation messages (max 20) */
@@ -147,6 +157,18 @@ export class ConversationMemory {
         this.ensure(chatId).lastAction = action;
     }
 
+    setFlowState(chatId: number, state: FlowState): void {
+        this.ensure(chatId).flowState = state;
+    }
+
+    getFlowState(chatId: number): FlowState | undefined {
+        return this.ensure(chatId).flowState;
+    }
+
+    clearFlowState(chatId: number): void {
+        this.ensure(chatId).flowState = undefined;
+    }
+
     /**
      * Clear only the transient action/payment/invoice/schedule/vendor context.
      * Preserves conversation history and language preference.
@@ -160,6 +182,7 @@ export class ConversationMemory {
         ctx.lastInvoice = undefined;
         ctx.lastSchedule = undefined;
         ctx.lastVendor = undefined;
+        this.clearFlowState(chatId);
     }
 
     /** Get full context for the user */
@@ -228,6 +251,9 @@ export class ConversationMemory {
         }
         if (ctx.lastAction) {
             parts.push(`[Last action: ${ctx.lastAction}]`);
+        }
+        if (ctx.flowState && ctx.flowState.name !== "idle") {
+            parts.push(`[Flow state: ${ctx.flowState.name}]`);
         }
 
         return "\n\nCurrent context:\n" + parts.join("\n");

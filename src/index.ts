@@ -338,7 +338,8 @@ export async function main() {
         conversationMemory,
         walletStore,
         researchTools,
-        (chatId, intent) => toolDispatcher.execute(chatId, intent)
+        (chatId, intent) => toolDispatcher.execute(chatId, intent),
+        config.USE_TOOL_CALLING
     );
 
     // ── Telegram handlers ────────────────────────────────────────────────────

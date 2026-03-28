@@ -43,7 +43,7 @@ export class ToolDispatcher {
         this.deps.memory.addBotMessage(chatId, msg);
     }
 
-    async execute(chatId: number, intent: ParsedIntent): Promise<void> {
+    async execute(chatId: number, intent: ParsedIntent): Promise<string> {
         const { paymentEngine, analyticsEngine, paymentRequestEngine,
             vendorStore, walletStore, scheduleStore,
             internalTools, memory } = this.deps;
@@ -59,12 +59,12 @@ export class ToolDispatcher {
                     if (!intent.message) {
                         await this.reply(chatId, "I need a recipient and amount to prepare a payment. Example: `send 5 usdc to aws`", { parse_mode: "Markdown" });
                     }
-                    return;
+                    return "";
                 }
                 const token = (intent.token === "EURC") ? "EURC" : "USDC";
                 await paymentEngine.preparePayment(chatId, beneficiary, amount, intent.memo ? String(intent.memo) : "ArcPay", { origin: "byok", token });
                 if (beneficiary) memory.setLastPayment(chatId, beneficiary, String(amount), token);
-                break;
+                return `Payment card prepared for ${amount} ${token} to ${beneficiary}. Awaiting confirmation.`;
             }
 
             // ── Schedule ───────────────────────────────────────────────
@@ -75,10 +75,11 @@ export class ToolDispatcher {
                     if (!intent.message) {
                         await this.reply(chatId, "I need a recipient, amount, and time to schedule a payment. Example: `schedule payment 10 usdc to aws tomorrow`", { parse_mode: "Markdown" });
                     }
-                    return;
+                    return "";
                 }
+                const scheduleToken = (intent.token === "EURC") ? "EURC" : "USDC";
                 await this.createSchedule(chatId, beneficiary, amount, intent);
-                break;
+                return `Schedule created for ${amount} ${scheduleToken} to ${beneficiary}.`;
             }
 
             case "cancel_schedule": {
@@ -87,13 +88,13 @@ export class ToolDispatcher {
                     const schedules = scheduleStore.getSchedules(chatId);
                     if (!schedules.length) {
                         await this.reply(chatId, "No active schedules found.");
-                        return;
+                        return "No active schedules.";
                     }
                     const list = schedules.map(s =>
                         `• \`${s.id}\` — ${s.amount} ${s.token ?? "USDC"} to ${escapeTelegramMarkdown(s.vendor)} (${s.frequency})`
                     ).join("\n");
                     await this.reply(chatId, `Which schedule would you like to cancel?\n\n${list}\n\nSay \`cancel schedule <id>\` to cancel one.`, { parse_mode: "Markdown" });
-                    return;
+                    return "Listed schedules for selection.";
                 }
                 const cancelled = scheduleStore.cancelSchedule(chatId, scheduleId);
                 if (cancelled) {
@@ -105,26 +106,26 @@ export class ToolDispatcher {
                 } else {
                     await this.reply(chatId, `Schedule \`${scheduleId}\` not found.`, { parse_mode: "Markdown" });
                 }
-                break;
+                return cancelled ? "Schedule cancelled." : "Schedule not found.";
             }
 
             case "cancel_all_schedules": {
                 const schedules = scheduleStore.getSchedules(chatId);
                 if (!schedules.length) {
                     await this.reply(chatId, "No active schedules to cancel.");
-                    return;
+                    return "No active schedules.";
                 }
                 for (const s of schedules) {
                     scheduleStore.cancelSchedule(chatId, s.id);
                 }
                 await this.reply(chatId, `❌ All ${schedules.length} schedule${schedules.length === 1 ? "" : "s"} cancelled.`);
-                break;
+                return "All schedules cancelled.";
             }
 
             case "list_schedules": {
                 const result = await internalTools.execute(chatId, "schedule_summary");
                 await this.reply(chatId, result.summary, { parse_mode: "Markdown" });
-                break;
+                return "Schedules listed.";
             }
 
             // ── Vendors ────────────────────────────────────────────────
@@ -135,23 +136,23 @@ export class ToolDispatcher {
                     if (!intent.message) {
                         await this.reply(chatId, "I need a vendor name and address. Example: `save vendor aws 0x...`", { parse_mode: "Markdown" });
                     }
-                    return;
+                    return "";
                 }
                 if (!ethers.isAddress(address)) {
                     await this.reply(chatId, "That doesn't look like a valid EVM address. Please provide a full `0x...` address.", { parse_mode: "Markdown" });
-                    return;
+                    return "";
                 }
-                vendorStore.saveVendor(chatId, name, address);
+                await vendorStore.saveVendor(chatId, name, address);
                 memory.setLastVendor(chatId, name, address);
                 await this.reply(chatId, `✅ Vendor **${escapeTelegramMarkdown(name)}** saved with address \`${address}\`.`, { parse_mode: "Markdown" });
-                break;
+                return `Vendor ${name} saved.`;
             }
 
             case "list_vendors": {
                 const vendors = vendorStore.getVendorsWithStats(chatId);
                 if (!vendors || Object.keys(vendors).length === 0) {
                     await this.reply(chatId, "No vendors saved yet. Use `save vendor <name> <0x...>` to add one.", { parse_mode: "Markdown" });
-                    return;
+                    return "Vendors listed.";
                 }
                 let msg = "📋 **Saved Vendors**\n\n";
                 for (const [name, data] of Object.entries(vendors)) {
@@ -160,14 +161,14 @@ export class ToolDispatcher {
                     msg += `• **${escapeTelegramMarkdown(display)}** \`${data.address.slice(0, 10)}...\`${stats}\n`;
                 }
                 await this.reply(chatId, msg, { parse_mode: "Markdown" });
-                break;
+                return "Vendors listed.";
             }
 
             case "remove_vendor": {
                 const name = intent.name ? String(intent.name) : null;
                 if (!name) {
                     await this.reply(chatId, "Which vendor would you like to remove?");
-                    return;
+                    return "";
                 }
                 const removed = await vendorStore.removeVendor(chatId, name);
                 await this.reply(chatId, removed
@@ -175,20 +176,18 @@ export class ToolDispatcher {
                     : `Vendor **${escapeTelegramMarkdown(name)}** not found.`,
                     { parse_mode: "Markdown" }
                 );
-                break;
+                return removed ? "Vendor removed." : "Vendor not found.";
             }
 
             case "remove_all_vendors": {
-                const vendors = vendorStore.getVendors(chatId);
-                if (!vendors) {
+                const { vendorStore: vs } = this.deps;
+                const count = vs.removeAllVendors(chatId);
+                if (count === 0) {
                     await this.reply(chatId, "No vendors to remove.");
-                    return;
+                } else {
+                    await this.reply(chatId, "✅ All vendors removed.");
                 }
-                for (const name of Object.keys(vendors)) {
-                    vendorStore.removeVendor(chatId, name);
-                }
-                await this.reply(chatId, "✅ All vendors removed.");
-                break;
+                return "All vendors removed.";
             }
 
             case "vendor_detail": {
@@ -196,14 +195,14 @@ export class ToolDispatcher {
                 const result = await internalTools.execute(chatId, "vendor_lookup", name ? { name } : {});
                 await this.reply(chatId, result.summary, { parse_mode: "Markdown" });
                 if (name) memory.setLastVendor(chatId, name);
-                break;
+                return result.summary;
             }
 
             case "top_vendors": {
                 const top = vendorStore.getTopVendors(chatId, 10);
                 if (!top.length) {
                     await this.reply(chatId, "No vendor spending data yet.");
-                    return;
+                    return "Top vendors shown.";
                 }
                 let msg = "🏆 **Top Vendors by Spending**\n\n";
                 top.forEach((v, i) => {
@@ -211,7 +210,7 @@ export class ToolDispatcher {
                     msg += `${i + 1}. **${escapeTelegramMarkdown(display)}** — ${v.data.totalPaid} USDC\n`;
                 });
                 await this.reply(chatId, msg, { parse_mode: "Markdown" });
-                break;
+                return "Top vendors shown.";
             }
 
             // ── Wallet ─────────────────────────────────────────────────
@@ -219,7 +218,7 @@ export class ToolDispatcher {
                 if (walletStore.hasWallet(chatId)) {
                     const address = walletStore.getWalletAddress(chatId);
                     await this.reply(chatId, `You already have a wallet: \`${address}\``, { parse_mode: "Markdown" });
-                    return;
+                    return "Wallet creation attempted.";
                 }
                 try {
                     await this.reply(chatId, "Creating your wallet on Arc Testnet...");
@@ -228,74 +227,75 @@ export class ToolDispatcher {
                         `✅ **Wallet Created**\n\nAddress: \`${address}\`\n\nYou can now receive and send USDC on Arc Testnet.`,
                         { parse_mode: "Markdown" }
                     );
-                } catch (error: any) {
-                    await this.reply(chatId, `❌ Failed to create wallet: ${error.message}`);
+                } catch (error: unknown) {
+                    const errMsg = error instanceof Error ? error.message : String(error);
+                    await this.reply(chatId, `❌ Failed to create wallet: ${errMsg}`);
                 }
-                break;
+                return "Wallet creation attempted.";
             }
 
             case "show_wallet": {
                 const result = await internalTools.execute(chatId, "wallet_summary");
                 await this.reply(chatId, result.summary, { parse_mode: "Markdown" });
-                break;
+                return result.summary;
             }
 
             case "export_wallet": {
                 await this.reply(chatId,
                     "This wallet is managed by Circle's MPC infrastructure — private keys are never exposed, not even to ArcPay Agent. This is by design: Circle's multi-party computation splits and distributes key material so no single party holds the full key.\n\nWhat you *can* do:\n• View your wallet address and balance with `show wallet`\n• Transfer your USDC to any external address you control"
                 );
-                break;
+                return "Wallet export info shown.";
             }
 
             case "wallet_intelligence": {
                 const result = await internalTools.execute(chatId, "wallet_summary");
                 await this.reply(chatId, result.summary, { parse_mode: "Markdown" });
-                break;
+                return result.summary;
             }
 
             // ── Analytics ──────────────────────────────────────────────
             case "report": {
                 await analyticsEngine.showReport(chatId, "month");
-                break;
+                return "Report shown.";
             }
 
             case "spending_by_vendor": {
                 await analyticsEngine.showVendorBreakdown(chatId, "all");
-                break;
+                return "Vendor breakdown shown.";
             }
 
             case "payment_history": {
                 await analyticsEngine.showHistory(chatId, 10);
-                break;
+                return "Payment history shown.";
             }
 
             case "show_recent_payments": {
                 const result = await internalTools.execute(chatId, "recent_payments", { limit: 5 });
                 await this.reply(chatId, result.summary, { parse_mode: "Markdown" });
-                break;
+                return result.summary;
             }
 
             case "show_pending_payments": {
                 const result = await internalTools.execute(chatId, "pending_payment_status");
                 await this.reply(chatId, result.summary, { parse_mode: "Markdown" });
-                break;
+                return result.summary;
             }
 
             case "monthly_spending": {
                 await analyticsEngine.showMonthlyBreakdown(chatId);
-                break;
+                return "Monthly breakdown shown.";
             }
 
             case "account_summary": {
                 const result = await internalTools.execute(chatId, "account_snapshot");
                 await this.reply(chatId, result.summary, { parse_mode: "Markdown" });
-                break;
+                return result.summary;
             }
 
             case "status": {
                 const result = await internalTools.execute(chatId, "agent_operations_overview");
                 await this.reply(chatId, result.summary, { parse_mode: "Markdown" });
-                break;
+                return result.summary;
             }
 
             // ── Payment requests ───────────────────────────────────────
@@ -303,29 +303,29 @@ export class ToolDispatcher {
                 const amount = intent.amount != null ? Number(intent.amount) : null;
                 if (!amount || amount <= 0) {
                     await this.reply(chatId, "How much USDC would you like to request?");
-                    return;
+                    return "";
                 }
                 await paymentRequestEngine.createRequest(chatId, amount);
-                break;
+                return "Payment request created.";
             }
 
             // ── Agent identity ─────────────────────────────────────────
             case "agent_status": {
                 const result = await internalTools.execute(chatId, "agent_registration_status");
                 await this.reply(chatId, result.summary, { parse_mode: "Markdown" });
-                break;
+                return result.summary;
             }
 
             case "agent_identity": {
                 const result = await internalTools.execute(chatId, "agent_identity");
                 await this.reply(chatId, result.summary, { parse_mode: "Markdown" });
-                break;
+                return result.summary;
             }
 
             case "agent_validation_status": {
                 const result = await internalTools.execute(chatId, "agent_validation_status");
                 await this.reply(chatId, result.summary, { parse_mode: "Markdown" });
-                break;
+                return result.summary;
             }
 
             // ── Invoice ────────────────────────────────────────────────
@@ -333,7 +333,7 @@ export class ToolDispatcher {
                 if (!intent.message) {
                     await this.reply(chatId, "Please send me the invoice as a PDF or photo and I'll analyze it for you.");
                 }
-                break;
+                return "Invoice analysis instructions shown.";
             }
 
             // ── Incoming payment watch ─────────────────────────────────
@@ -341,7 +341,7 @@ export class ToolDispatcher {
                 const { watchStore, walletStore: ws, usdc, eurc } = this.deps;
                 if (!ws.hasWallet(chatId)) {
                     await this.reply(chatId, "You need a wallet first. Use `create wallet` to set one up.", { parse_mode: "Markdown" });
-                    return;
+                    return "Watch enabled.";
                 }
                 const addr = ws.getWalletAddress(chatId)!;
                 try {
@@ -351,10 +351,11 @@ export class ToolDispatcher {
                     ]);
                     watchStore.enable(chatId, addr, usdcBal.toString(), eurcBal.toString());
                     await this.reply(chatId, "✅ **Incoming payment notifications enabled.**\n\nI'll notify you whenever USDC or EURC arrives in your wallet.", { parse_mode: "Markdown" });
-                } catch (err: any) {
-                    await this.reply(chatId, `❌ Failed to enable watch: ${err.message}`);
+                } catch (err: unknown) {
+                    const errMsg = err instanceof Error ? err.message : String(err);
+                    await this.reply(chatId, `❌ Failed to enable watch: ${errMsg}`);
                 }
-                break;
+                return "Watch enabled.";
             }
 
             case "watch_payments_disable": {
@@ -364,7 +365,7 @@ export class ToolDispatcher {
                     ? "🔕 Incoming payment notifications disabled."
                     : "Incoming payment notifications were not enabled."
                 );
-                break;
+                return "Watch disabled.";
             }
 
             case "watch_payments_status": {
@@ -375,7 +376,7 @@ export class ToolDispatcher {
                     : "🔕 Incoming payment notifications are **disabled**. Say `watch my wallet` to enable them.",
                     { parse_mode: "Markdown" }
                 );
-                break;
+                return "Watch status shown.";
             }
 
             // ── Price alerts ───────────────────────────────────────────
@@ -388,7 +389,7 @@ export class ToolDispatcher {
 
                 if (!symbol || !alertPrice || !direction) {
                     await this.reply(chatId, "I need a symbol, target price, and direction. Example: `alert me when BTC goes above $100000`", { parse_mode: "Markdown" });
-                    return;
+                    return "";
                 }
 
                 const alert = alertStore.createAlert(chatId, symbol, alertPrice, direction);
@@ -397,7 +398,7 @@ export class ToolDispatcher {
                     `🔔 **Price alert set**\n\nI'll notify you when **${symbol}** ${dirWord} $${alertPrice.toLocaleString("en-US")}.\nAlert ID: \`${alert.id}\``,
                     { parse_mode: "Markdown" }
                 );
-                break;
+                return `Price alert set for ${symbol}.`;
             }
 
             case "list_price_alerts": {
@@ -405,7 +406,7 @@ export class ToolDispatcher {
                 const alerts = alertStore.getAlerts(chatId);
                 if (!alerts.length) {
                     await this.reply(chatId, "No active price alerts. Say `alert me when BTC hits $X` to set one.", { parse_mode: "Markdown" });
-                    return;
+                    return "Price alerts listed.";
                 }
                 let msg = "🔔 **Active Price Alerts**\n\n";
                 for (const a of alerts) {
@@ -413,7 +414,7 @@ export class ToolDispatcher {
                     msg += `• \`${a.id}\` **${a.symbol}** ${dirWord} $${a.targetPrice.toLocaleString("en-US")}\n`;
                 }
                 await this.reply(chatId, msg, { parse_mode: "Markdown" });
-                break;
+                return "Price alerts listed.";
             }
 
             case "remove_price_alert": {
@@ -423,7 +424,7 @@ export class ToolDispatcher {
                     const alerts = alertStore.getAlerts(chatId);
                     if (!alerts.length) {
                         await this.reply(chatId, "No active price alerts to remove.");
-                        return;
+                        return "Alert not found.";
                     }
                     let msg = "Which alert would you like to remove?\n\n";
                     for (const a of alerts) {
@@ -432,7 +433,7 @@ export class ToolDispatcher {
                     }
                     msg += "\nSay `remove alert <id>` to remove one.";
                     await this.reply(chatId, msg, { parse_mode: "Markdown" });
-                    return;
+                    return "Alert not found.";
                 }
                 const removed = alertStore.removeAlert(chatId, alertId);
                 await this.reply(chatId, removed
@@ -440,7 +441,7 @@ export class ToolDispatcher {
                     : `Alert \`${alertId}\` not found.`,
                     { parse_mode: "Markdown" }
                 );
-                break;
+                return removed ? "Alert removed." : "Alert not found.";
             }
 
             case "remove_all_price_alerts": {
@@ -450,19 +451,19 @@ export class ToolDispatcher {
                     ? `✅ All ${count} price alert${count === 1 ? "" : "s"} removed.`
                     : "No active price alerts to remove."
                 );
-                break;
+                return "All alerts removed.";
             }
 
             // ── Chat (LLM produced message only, no action needed) ─────
             case "chat": {
                 // Message already sent by orchestrator
-                break;
+                return "";
             }
 
             default: {
                 console.warn(`[ToolDispatcher] Unknown action: ${action}`);
                 // No additional message - orchestrator already sent intent.message
-                break;
+                return "";
             }
         }
     }

@@ -26,16 +26,19 @@ function makeOrchestrator(lastAction?: string) {
         addUserMessage: vi.fn(),
         addBotMessage: vi.fn(),
         getContext: vi.fn().mockReturnValue({ lastAction: lastAction ?? null }),
+        getFlowState: vi.fn().mockReturnValue(undefined),
         buildContextSummary: vi.fn().mockReturnValue(""),
         getHistory: vi.fn().mockReturnValue([]),
         setLastAction: vi.fn(),
+        setFlowState: vi.fn(),
+        clearFlowState: vi.fn(),
     };
     const walletStore = { getWalletAddress: vi.fn().mockReturnValue(null) };
     const researchTools = {
         isResearchAction: vi.fn().mockReturnValue(false),
         fetch: vi.fn(),
     };
-    const dispatchFn = vi.fn().mockResolvedValue(undefined);
+    const dispatchFn = vi.fn().mockResolvedValue("");
 
     const orc = new Orchestrator(
         bot as any,
