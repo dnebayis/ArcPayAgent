@@ -254,9 +254,12 @@ export class Orchestrator {
                     break;
                 }
 
-                // Update flow state
+                // Update flow state — only set payment_awaiting_confirmation when a card was
+                // actually shown (empty toolResult means preparePayment returned early with an error).
                 if (toolResp.toolName === "create_payment") {
-                    this.memory.setFlowState(chatId, { name: "payment_awaiting_confirmation", since: Date.now() });
+                    if (toolResult) {
+                        this.memory.setFlowState(chatId, { name: "payment_awaiting_confirmation", since: Date.now() });
+                    }
                 } else {
                     this.memory.setLastAction(chatId, toolResp.toolName);
                 }
@@ -370,9 +373,13 @@ export class Orchestrator {
         }
 
         try {
-            await this.dispatchFn(chatId, intent);
+            const result = await this.dispatchFn(chatId, intent);
             if (intent.action === "create_payment") {
-                this.memory.setFlowState(chatId, { name: "payment_awaiting_confirmation", since: Date.now() });
+                // Only mark as awaiting confirmation when preparePayment actually showed a card.
+                // An empty result means it returned early (vendor not found, bad address, etc.).
+                if (result) {
+                    this.memory.setFlowState(chatId, { name: "payment_awaiting_confirmation", since: Date.now() });
+                }
             } else {
                 this.memory.setLastAction(chatId, intent.action!);
             }

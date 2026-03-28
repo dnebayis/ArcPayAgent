@@ -63,6 +63,11 @@ export class ToolDispatcher {
                 }
                 const token = (intent.token === "EURC") ? "EURC" : "USDC";
                 await paymentEngine.preparePayment(chatId, beneficiary, amount, intent.memo ? String(intent.memo) : "ArcPay", { origin: "byok", token });
+                // preparePayment may return early (vendor not found, bad address, etc.) without
+                // creating a pending payment. Only signal success when a card was actually shown.
+                if (!paymentEngine.hasPendingPayment(chatId)) {
+                    return "";
+                }
                 if (beneficiary) memory.setLastPayment(chatId, beneficiary, String(amount), token);
                 memory.recordEpisodicEvent(chatId, `initiated payment: ${amount} ${token} to ${beneficiary}`);
                 return `Payment card prepared for ${amount} ${token} to ${beneficiary}. Awaiting confirmation.`;

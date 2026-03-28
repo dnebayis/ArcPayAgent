@@ -523,6 +523,10 @@ export class PaymentEngine {
         });
     }
 
+    hasPendingPayment(chatId: number): boolean {
+        return !!(this.pendingPay[chatId.toString()] || this.pendingPaymentStore?.getPendingPayment(chatId));
+    }
+
     cancelPendingPayment(chatId: number) {
         const chatIdStr = chatId.toString();
         if (this.pendingPay[chatIdStr] || this.hydratePendingPayment(chatId)) {
