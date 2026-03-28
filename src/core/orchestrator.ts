@@ -76,6 +76,33 @@ export class Orchestrator {
 
     private static readonly CAPABILITY_MESSAGE = "Here's what I can do:\n• Send USDC and EURC payments instantly\n• Schedule one-time or recurring payments\n• Save and manage vendors\n• Analyze invoice PDFs and photos for risk\n• Show spending reports, payment history, monthly breakdowns\n• Look up live crypto prices and fiat FX rates\n• Watch your wallet for incoming payment notifications\n• Set price alerts (e.g., \"alert me when BTC hits $100k\")\n• Answer questions about Arc and Circle\n• Show your on-chain activity on Arc Testnet\n\nWhat would you like to do?";
 
+    /**
+     * Actions where the dispatcher always produces its own real data output.
+     * For these, the LLM's "message" field is only sent if it's a brief
+     * loading indicator (≤120 chars). Long or fabricated messages are suppressed.
+     */
+    private static readonly DATA_DISPLAY_ACTIONS = new Set([
+        "list_vendors", "show_wallet", "monthly_spending", "payment_history",
+        "show_recent_payments", "report", "spending_by_vendor", "list_schedules",
+        "top_vendors", "list_price_alerts", "account_summary", "vendor_detail",
+        "wallet_intelligence", "show_pending_payments", "agent_status",
+        "agent_identity", "agent_validation_status", "watch_payments_status", "status",
+    ]);
+
+    /**
+     * Returns true if the message looks like fabricated/placeholder data that
+     * should be suppressed. Protects against LLMs that generate fake lists.
+     */
+    private static isFabricatedMessage(action: string | undefined, message: string): boolean {
+        if (!action || !Orchestrator.DATA_DISPLAY_ACTIONS.has(action)) return false;
+        if (/\[.{1,60}\]/.test(message)) return true;           // [Vendor Name], [Address]
+        if (/^\s*\d+\.\s+\S/m.test(message)) return true;      // 1. Item\n2. Item
+        if (/[-•]\s+\*\*/.test(message)) return true;           // - **Vendor** (markdown list)
+        if (message.length > 120) return true;                  // Too long for a loading indicator
+        return false;
+    }
+
+
     async handleMessage(chatId: number, text: string): Promise<void> {
         if (!text?.trim()) return;
 
@@ -179,8 +206,9 @@ export class Orchestrator {
                     break;
                 }
 
-                // Tool call — send pre-tool message if any
-                if (toolResp.message) {
+                // Tool call — send pre-tool message if any (suppress fabricated data)
+                if (toolResp.message
+                    && !Orchestrator.isFabricatedMessage(toolResp.toolName, toolResp.message)) {
                     await this.bot.sendMessage(chatId, toolResp.message);
                     this.memory.addBotMessage(chatId, toolResp.message);
                 }
@@ -335,7 +363,8 @@ export class Orchestrator {
             return;
         }
 
-        if (intent.message && typeof intent.message === "string") {
+        if (intent.message && typeof intent.message === "string"
+            && !Orchestrator.isFabricatedMessage(intent.action, intent.message)) {
             await this.bot.sendMessage(chatId, intent.message);
             this.memory.addBotMessage(chatId, intent.message);
         }
