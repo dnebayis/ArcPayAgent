@@ -30,6 +30,15 @@ export class AlertStore {
         const key = chatId.toString();
         if (!this.data[key]) this.data[key] = [];
 
+        // Dedup: return existing untriggered alert for same symbol+direction+price
+        const existing = this.data[key].find(
+            a => !a.triggered
+                && a.symbol === symbol.toUpperCase()
+                && a.direction === direction
+                && a.targetPrice === targetPrice
+        );
+        if (existing) return existing;
+
         const alert: PriceAlert = {
             id: randomBytes(4).toString("hex"),
             chatId,

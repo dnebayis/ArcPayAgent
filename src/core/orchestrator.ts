@@ -82,6 +82,9 @@ export class Orchestrator {
      * loading indicator (≤120 chars). Long or fabricated messages are suppressed.
      */
     private static readonly DATA_DISPLAY_ACTIONS = new Set([
+        // create_payment: engine sends the real payment card with buttons.
+        // Suppress any LLM message longer than 120 chars (fabricated review cards).
+        "create_payment",
         "list_vendors", "show_wallet", "monthly_spending",
         "show_recent_payments", "report", "spending_by_vendor", "list_schedules",
         "top_vendors", "list_price_alerts", "account_summary", "vendor_detail",
@@ -242,10 +245,12 @@ export class Orchestrator {
                     ...(toolResp.toolArgs as object)
                 };
 
-                // Guard: missing amount for create_payment
+                // Guard: missing or implicit amount for create_payment.
+                // If user message has no digit, LLM likely reused lastPayment amount — ask explicitly.
                 if (intent.action === "create_payment") {
                     const amount = Number(intent.amount);
-                    if (!intent.amount || isNaN(amount) || amount <= 0) {
+                    const userHasDigit = /\d/.test(text);
+                    if (!intent.amount || isNaN(amount) || amount <= 0 || !userHasDigit) {
                         const tok = (intent.token as string) ?? "USDC";
                         const ben = intent.beneficiary ? ` to ${String(intent.beneficiary)}` : "";
                         const msg = `How much ${tok} would you like to send${ben}?`;
@@ -350,11 +355,14 @@ export class Orchestrator {
             return;
         }
 
-        // Guard: missing amount for create_payment
+        // Guard: missing or implicit amount for create_payment.
+        // If the user's message contains no digit, the LLM likely reused lastPayment
+        // amount from context — ask explicitly rather than silently reusing it.
         if (intent.action === "create_payment") {
             const amount = Number(intent.amount);
-            if (!intent.amount || isNaN(amount) || amount <= 0) {
-                const token = intent.token ?? "USDC";
+            const userHasDigit = /\d/.test(text);
+            if (!intent.amount || isNaN(amount) || amount <= 0 || !userHasDigit) {
+                const token = (intent.token as string) ?? "USDC";
                 const beneficiary = intent.beneficiary ? ` to ${String(intent.beneficiary)}` : "";
                 const msg = `How much ${token} would you like to send${beneficiary}?`;
                 await this.bot.sendMessage(chatId, msg);
@@ -365,6 +373,16 @@ export class Orchestrator {
 
         if (!intent.action) {
             if (intent.message && typeof intent.message === "string") {
+                // Guard: suppress fabricated "Confirm/Cancel button" messages when no payment is pending.
+                // LLM sometimes hallucinates these instructions after payment-related conversation.
+                const flowState = this.memory.getFlowState(chatId);
+                const isPaymentPending = flowState?.name === "payment_awaiting_confirmation"
+                    || this.memory.getContext(chatId).lastAction === "create_payment";
+                const hasFakeButtonRef = /confirm button|cancel button/i.test(intent.message);
+                if (hasFakeButtonRef && !isPaymentPending) {
+                    logger.warn(null, "[Orchestrator] Suppressed false Confirm/Cancel button message", { chatId });
+                    return;
+                }
                 await this.bot.sendMessage(chatId, intent.message);
                 this.memory.addBotMessage(chatId, intent.message);
             }

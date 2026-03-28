@@ -529,7 +529,7 @@ export class PaymentEngine {
             ]
         ];
 
-        this.sendAndNotify(chatId, message, {
+        await this.sendAndNotify(chatId, message, {
             parse_mode: "Markdown",
             reply_markup: {
                 inline_keyboard: inlineKeyboard
@@ -675,7 +675,7 @@ export class PaymentEngine {
         }
     }
 
-    updatePendingPayment(chatId: number, updates: { amount?: number, vendor?: string, memo?: string }) {
+    async updatePendingPayment(chatId: number, updates: { amount?: number, vendor?: string, memo?: string }): Promise<void> {
         const chatIdStr = chatId.toString();
         const payment = this.pendingPay[chatIdStr] || this.hydratePendingPayment(chatId);
 
@@ -741,7 +741,7 @@ export class PaymentEngine {
             ]
         ];
 
-        this.sendAndNotify(chatId, message, {
+        await this.sendAndNotify(chatId, message, {
             parse_mode: "Markdown",
             reply_markup: {
                 inline_keyboard: inlineKeyboard

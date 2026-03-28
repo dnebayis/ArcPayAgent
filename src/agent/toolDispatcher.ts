@@ -494,6 +494,8 @@ export class ToolDispatcher {
             /\bkendi (adresim|cüzdanım|cüzdan adresim|cüzdan adresime)\b/i,
             /\bkendi adres(im|ine|e)\b/i,
             /\bbenim (adresim|cüzdanım)\b/i,
+            /^(me|myself)$/i,           // "send 10 usdc to me"
+            /\bkendime\b/i,             // Turkish: "kendime gönder"
         ];
         const isSelf = SELF_PATTERNS.some(re => re.test(beneficiary));
         if (!isSelf) return null;
