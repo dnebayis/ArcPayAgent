@@ -19,6 +19,8 @@ export interface ToolCallResponse {
     toolArgs?: Record<string, unknown>;
     toolCallId?: string;        // id for feeding back tool results
     finishReason: "stop" | "tool_calls";
+    usage?: { promptTokens: number; completionTokens: number; totalTokens: number };
+    latencyMs?: number;
 }
 
 /** Extended message type that supports tool result messages */
@@ -281,13 +283,14 @@ async function callOpenAICompatibleWithTools(
         usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
     };
     const toolUsage = (data as any).usage ?? {};
-    logger.info(null, "[LLM] Request completed", {
-        provider: auth.provider,
-        model: config.model,
+    const latencyMs = Date.now() - start;
+    const usage = {
         promptTokens: toolUsage.prompt_tokens ?? 0,
         completionTokens: toolUsage.completion_tokens ?? 0,
         totalTokens: toolUsage.total_tokens ?? 0,
-        latencyMs: Date.now() - start,
+    };
+    logger.info(null, "[LLM] Request completed", {
+        provider: auth.provider, model: config.model, ...usage, latencyMs,
     });
     const choice = data.choices?.[0];
     if (!choice?.message) return null;
@@ -303,12 +306,16 @@ async function callOpenAICompatibleWithTools(
             toolCallId: tc.id,
             finishReason: "tool_calls",
             message: choice.message.content ?? undefined,
+            usage,
+            latencyMs,
         };
     }
 
     return {
         message: choice.message.content ?? undefined,
         finishReason: "stop",
+        usage,
+        latencyMs,
     };
 }
 
@@ -368,13 +375,14 @@ async function callAnthropicWithTools(
         usage?: { input_tokens?: number; output_tokens?: number };
     };
     const anthropicUsage = data.usage ?? {};
-    logger.info(null, "[LLM] Request completed", {
-        provider: "anthropic",
-        model: auth.model || "claude-3-5-sonnet-latest",
+    const latencyMs = Date.now() - start;
+    const usage = {
         promptTokens: anthropicUsage.input_tokens ?? 0,
         completionTokens: anthropicUsage.output_tokens ?? 0,
         totalTokens: (anthropicUsage.input_tokens ?? 0) + (anthropicUsage.output_tokens ?? 0),
-        latencyMs: Date.now() - start,
+    };
+    logger.info(null, "[LLM] Request completed", {
+        provider: "anthropic", model: auth.model || "claude-3-5-sonnet-latest", ...usage, latencyMs,
     });
 
     const textBlock = data.content?.find(b => b.type === "text");
@@ -387,12 +395,16 @@ async function callAnthropicWithTools(
             toolCallId: toolUseBlock.id,
             finishReason: "tool_calls",
             message: textBlock?.text,
+            usage,
+            latencyMs,
         };
     }
 
     return {
         message: textBlock?.text,
         finishReason: "stop",
+        usage,
+        latencyMs,
     };
 }
 
@@ -455,13 +467,14 @@ async function callGeminiWithTools(
         usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number; totalTokenCount?: number };
     };
     const geminiToolUsage = data.usageMetadata ?? {};
-    logger.info(null, "[LLM] Request completed", {
-        provider: "gemini",
-        model: auth.model || "gemini-2.0-flash",
+    const latencyMs = Date.now() - start;
+    const usage = {
         promptTokens: geminiToolUsage.promptTokenCount ?? 0,
         completionTokens: geminiToolUsage.candidatesTokenCount ?? 0,
         totalTokens: geminiToolUsage.totalTokenCount ?? 0,
-        latencyMs: Date.now() - start,
+    };
+    logger.info(null, "[LLM] Request completed", {
+        provider: "gemini", model: auth.model || "gemini-2.0-flash", ...usage, latencyMs,
     });
 
     const parts = data.candidates?.[0]?.content?.parts ?? [];
@@ -476,12 +489,16 @@ async function callGeminiWithTools(
             toolCallId: `gemini-${Date.now()}`,
             finishReason: "tool_calls",
             message: textPart?.text,
+            usage,
+            latencyMs,
         };
     }
 
     return {
         message: textPart?.text,
         finishReason: "stop",
+        usage,
+        latencyMs,
     };
 }
 

@@ -195,7 +195,11 @@ export class Orchestrator {
                 }
 
                 logger.info(traceId, "[Orchestrator] Tool call response", {
-                    chatId, iter, latencyMs: Date.now() - llmStart,
+                    chatId, iter,
+                    latencyMs: toolResp.latencyMs ?? (Date.now() - llmStart),
+                    promptTokens: toolResp.usage?.promptTokens,
+                    completionTokens: toolResp.usage?.completionTokens,
+                    totalTokens: toolResp.usage?.totalTokens,
                     toolName: toolResp.toolName, finishReason: toolResp.finishReason
                 });
 
