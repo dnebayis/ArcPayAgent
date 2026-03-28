@@ -1,5 +1,6 @@
 import TelegramBot from "node-telegram-bot-api";
 import { ethers } from "ethers";
+import { safeSend } from "../utils/telegramSend";
 import { PaymentEngine } from "../engines/paymentEngine";
 import { AnalyticsEngine } from "../engines/analyticsEngine";
 import { PaymentRequestEngine } from "../engines/paymentRequestEngine";
@@ -38,9 +39,7 @@ export class ToolDispatcher {
     constructor(private deps: ToolDispatcherDeps) { }
 
     private async reply(chatId: number, msg: string, opts?: object): Promise<void> {
-        await this.deps.bot.sendMessage(chatId, msg, opts as any).catch(() =>
-            this.deps.bot.sendMessage(chatId, msg)
-        );
+        await safeSend(this.deps.bot, chatId, msg, opts as TelegramBot.SendMessageOptions);
         this.deps.memory.addBotMessage(chatId, msg);
     }
 
@@ -170,7 +169,7 @@ export class ToolDispatcher {
                     await this.reply(chatId, "Which vendor would you like to remove?");
                     return;
                 }
-                const removed = vendorStore.removeVendor(chatId, name);
+                const removed = await vendorStore.removeVendor(chatId, name);
                 await this.reply(chatId, removed
                     ? `✅ Vendor **${escapeTelegramMarkdown(name)}** removed.`
                     : `Vendor **${escapeTelegramMarkdown(name)}** not found.`,

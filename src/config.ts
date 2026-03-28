@@ -31,6 +31,8 @@ const productionSchema = z.object({
     ERC8004_IDENTITY_REGISTRY_ADDRESS: optionalString(),
     ERC8004_REPUTATION_REGISTRY_ADDRESS: optionalString(),
     ERC8004_VALIDATION_REGISTRY_ADDRESS: optionalString(),
+    /** Comma-separated Telegram chat IDs that may use the bot. Empty = open to all. */
+    ALLOWED_CHAT_IDS: z.string().trim().optional().default(""),
 });
 
 const testSchema = z.object({
@@ -53,6 +55,7 @@ const testSchema = z.object({
     ERC8004_IDENTITY_REGISTRY_ADDRESS: optionalString(),
     ERC8004_REPUTATION_REGISTRY_ADDRESS: optionalString(),
     ERC8004_VALIDATION_REGISTRY_ADDRESS: optionalString(),
+    ALLOWED_CHAT_IDS: z.string().trim().optional().default(""),
 });
 
 export type RuntimeConfig = z.infer<typeof productionSchema>;

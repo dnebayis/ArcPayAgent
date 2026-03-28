@@ -2,40 +2,40 @@ import { describe, it, expect } from "vitest";
 import { VendorStore } from "../../src/storage/vendorStore";
 
 describe("VendorStore", () => {
-    it("should save and retrieve vendors correctly", () => {
+    it("should save and retrieve vendors correctly", async () => {
         const store = new VendorStore();
 
-        store.saveVendor("1234", "jack", "0xabc123");
+        await store.saveVendor("1234", "jack", "0xabc123");
         expect(store.getVendor("1234", "jack")).toBe("0xabc123");
     });
 
-    it("should resolve vendor names case-insensitively", () => {
+    it("should resolve vendor names case-insensitively", async () => {
         const store = new VendorStore();
 
-        store.saveVendor(1, "Jack", "0xabc123");
+        await store.saveVendor(1, "Jack", "0xabc123");
         expect(store.getVendor(1, "jack")).toBe("0xabc123");
         expect(store.getVendor(1, "JACK")).toBe("0xabc123");
         expect(store.getVendor(1, "Jack")).toBe("0xabc123");
     });
 
-    it("should resolve vendor names across punctuation differences", () => {
+    it("should resolve vendor names across punctuation differences", async () => {
         const store = new VendorStore();
 
-        store.saveVendor(1, "Anthropic, PBC", "0xabc123");
+        await store.saveVendor(1, "Anthropic, PBC", "0xabc123");
         expect(store.getVendor(1, "Anthropic PBC")).toBe("0xabc123");
     });
 
-    it("should resolve vendor names across spacing differences", () => {
+    it("should resolve vendor names across spacing differences", async () => {
         const store = new VendorStore();
 
-        store.saveVendor(1, "Office Rent", "0xabc123");
+        await store.saveVendor(1, "Office Rent", "0xabc123");
         expect(store.getVendor(1, "OfficeRent")).toBe("0xabc123");
     });
 
-    it("should return canonical vendor match details", () => {
+    it("should return canonical vendor match details", async () => {
         const store = new VendorStore();
 
-        store.saveVendor(1, "Anthropic, PBC", "0xabc123");
+        await store.saveVendor(1, "Anthropic, PBC", "0xabc123");
         const match = store.resolveVendor(1, "Anthropic PBC");
 
         expect(match).not.toBeNull();
@@ -43,10 +43,10 @@ describe("VendorStore", () => {
         expect(match!.data.address).toBe("0xabc123");
     });
 
-    it("should preserve display casing for vendor names", () => {
+    it("should preserve display casing for vendor names", async () => {
         const store = new VendorStore();
 
-        store.saveVendor(1, "Anthropic, PBC", "0xabc123");
+        await store.saveVendor(1, "Anthropic, PBC", "0xabc123");
 
         expect(store.getVendorDisplayName(1, "anthropic pbc")).toBe("Anthropic, PBC");
         expect(store.getVendorDisplayNameByAddress(1, "0xabc123")).toBe("Anthropic, PBC");
@@ -57,22 +57,22 @@ describe("VendorStore", () => {
         expect(store.getVendor("1234", "nobody")).toBeNull();
     });
 
-    it("should isolate vendors per user", () => {
+    it("should isolate vendors per user", async () => {
         const store = new VendorStore();
 
-        store.saveVendor(1, "bob", "0x00001");
-        store.saveVendor(2, "bob", "0x00002");
+        await store.saveVendor(1, "bob", "0x00001");
+        await store.saveVendor(2, "bob", "0x00002");
 
         expect(store.getVendor(1, "bob")).toBe("0x00001");
         expect(store.getVendor(2, "bob")).toBe("0x00002");
     });
 
-    it("should overwrite existing vendor address but preserve stats", () => {
+    it("should overwrite existing vendor address but preserve stats", async () => {
         const store = new VendorStore();
 
-        store.saveVendor(1, "aws", "0xOldAddress");
+        await store.saveVendor(1, "aws", "0xOldAddress");
         store.recordPayment(1, "aws", 50);
-        store.saveVendor(1, "aws", "0xNewAddress");
+        await store.saveVendor(1, "aws", "0xNewAddress");
 
         expect(store.getVendor(1, "aws")).toBe("0xNewAddress");
         // Stats should be preserved
@@ -80,11 +80,11 @@ describe("VendorStore", () => {
         expect(data!.totalPaid).toBe(50);
     });
 
-    it("should list all vendors for a user", () => {
+    it("should list all vendors for a user", async () => {
         const store = new VendorStore();
 
-        store.saveVendor(1, "aws", "0x001");
-        store.saveVendor(1, "gcp", "0x002");
+        await store.saveVendor(1, "aws", "0x001");
+        await store.saveVendor(1, "gcp", "0x002");
 
         const vendors = store.getVendors(1);
         expect(vendors).not.toBeNull();
@@ -100,9 +100,9 @@ describe("VendorStore", () => {
 });
 
 describe("VendorStore — Statistics", () => {
-    it("should record payment and update totalPaid", () => {
+    it("should record payment and update totalPaid", async () => {
         const store = new VendorStore();
-        store.saveVendor(1, "aws", "0x001");
+        await store.saveVendor(1, "aws", "0x001");
 
         store.recordPayment(1, "aws", 25);
         store.recordPayment(1, "aws", 75);
@@ -114,9 +114,9 @@ describe("VendorStore — Statistics", () => {
         expect(data!.lastPayment).toBeGreaterThan(0);
     });
 
-    it("should record invoice timestamp", () => {
+    it("should record invoice timestamp", async () => {
         const store = new VendorStore();
-        store.saveVendor(1, "vercel", "0x002");
+        await store.saveVendor(1, "vercel", "0x002");
 
         store.recordInvoice(1, "vercel");
 
@@ -124,11 +124,11 @@ describe("VendorStore — Statistics", () => {
         expect(data!.lastInvoice).toBeGreaterThan(0);
     });
 
-    it("should return top vendors sorted by totalPaid", () => {
+    it("should return top vendors sorted by totalPaid", async () => {
         const store = new VendorStore();
-        store.saveVendor(1, "aws", "0x001");
-        store.saveVendor(1, "openai", "0x002");
-        store.saveVendor(1, "vercel", "0x003");
+        await store.saveVendor(1, "aws", "0x001");
+        await store.saveVendor(1, "openai", "0x002");
+        await store.saveVendor(1, "vercel", "0x003");
 
         store.recordPayment(1, "aws", 120);
         store.recordPayment(1, "openai", 35);
@@ -142,10 +142,10 @@ describe("VendorStore — Statistics", () => {
         expect(top[2].name).toBe("vercel");
     });
 
-    it("should exclude vendors with zero totalPaid from top vendors", () => {
+    it("should exclude vendors with zero totalPaid from top vendors", async () => {
         const store = new VendorStore();
-        store.saveVendor(1, "aws", "0x001");
-        store.saveVendor(1, "unused", "0x002");
+        await store.saveVendor(1, "aws", "0x001");
+        await store.saveVendor(1, "unused", "0x002");
 
         store.recordPayment(1, "aws", 50);
 
@@ -154,9 +154,9 @@ describe("VendorStore — Statistics", () => {
         expect(top[0].name).toBe("aws");
     });
 
-    it("should return full vendor data with getVendorData", () => {
+    it("should return full vendor data with getVendorData", async () => {
         const store = new VendorStore();
-        store.saveVendor(1, "aws", "0x001");
+        await store.saveVendor(1, "aws", "0x001");
 
         const data = store.getVendorData(1, "aws");
         expect(data).not.toBeNull();
@@ -167,19 +167,19 @@ describe("VendorStore — Statistics", () => {
         expect(data!.lastInvoice).toBeNull();
     });
 
-    it("should remove a vendor", () => {
+    it("should remove a vendor", async () => {
         const store = new VendorStore();
-        store.saveVendor(1, "aws", "0x001");
+        await store.saveVendor(1, "aws", "0x001");
 
-        expect(store.removeVendor(1, "aws")).toBe(true);
+        expect(await store.removeVendor(1, "aws")).toBe(true);
         expect(store.getVendor(1, "aws")).toBeNull();
-        expect(store.removeVendor(1, "aws")).toBe(false);
+        expect(await store.removeVendor(1, "aws")).toBe(false);
     });
 
-    it("should remove all vendors", () => {
+    it("should remove all vendors", async () => {
         const store = new VendorStore();
-        store.saveVendor(1, "aws", "0x001");
-        store.saveVendor(1, "gcp", "0x002");
+        await store.saveVendor(1, "aws", "0x001");
+        await store.saveVendor(1, "gcp", "0x002");
 
         const count = store.removeAllVendors(1);
         expect(count).toBe(2);

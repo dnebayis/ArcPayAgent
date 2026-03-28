@@ -22,11 +22,30 @@ export interface VendorMatch {
 
 export class VendorStore {
     private store: Record<string, UserVendors>;
+    /** Per-chatId write locks to prevent concurrent save/remove races */
+    private writeLocks: Map<string, Promise<void>> = new Map();
 
     constructor() {
         const raw = loadStore<Record<string, any>>(VENDOR_FILE);
         // Migration: convert old string-only format to new VendorData format
         this.store = this.migrateStore(raw);
+    }
+
+    /** Serialize write operations per chatId using a promise chain mutex */
+    private async withLock<T>(chatId: string, fn: () => T): Promise<T> {
+        const prev = this.writeLocks.get(chatId) ?? Promise.resolve();
+        let resolve!: () => void;
+        const next = new Promise<void>(r => { resolve = r; });
+        this.writeLocks.set(chatId, next);
+        await prev;
+        try {
+            return fn();
+        } finally {
+            resolve();
+            if (this.writeLocks.get(chatId) === next) {
+                this.writeLocks.delete(chatId);
+            }
+        }
     }
 
     /**
@@ -159,25 +178,27 @@ export class VendorStore {
         return null;
     }
 
-    saveVendor(chatId: string | number, name: string, address: string): void {
+    saveVendor(chatId: string | number, name: string, address: string): Promise<void> {
         const id = chatId.toString();
-        const vendorName = this.normalizeVendorName(name);
+        return this.withLock(id, () => {
+            const vendorName = this.normalizeVendorName(name);
 
-        if (!this.store[id]) {
-            this.store[id] = { vendors: {} };
-        }
+            if (!this.store[id]) {
+                this.store[id] = { vendors: {} };
+            }
 
-        // Preserve existing stats if vendor already exists
-        const existing = this.store[id].vendors[vendorName];
-        this.store[id].vendors[vendorName] = {
-            address,
-            displayName: name.trim(),
-            totalPaid: existing?.totalPaid || 0,
-            invoiceCount: existing?.invoiceCount || 0,
-            lastPayment: existing?.lastPayment || null,
-            lastInvoice: existing?.lastInvoice || null
-        };
-        this.persist();
+            // Preserve existing stats if vendor already exists
+            const existing = this.store[id].vendors[vendorName];
+            this.store[id].vendors[vendorName] = {
+                address,
+                displayName: name.trim(),
+                totalPaid: existing?.totalPaid || 0,
+                invoiceCount: existing?.invoiceCount || 0,
+                lastPayment: existing?.lastPayment || null,
+                lastInvoice: existing?.lastInvoice || null
+            };
+            this.persist();
+        });
     }
 
     getVendor(chatId: string | number, name: string): string | null {
@@ -286,17 +307,19 @@ export class VendorStore {
         this.persist();
     }
 
-    removeVendor(chatId: string | number, name: string): boolean {
+    removeVendor(chatId: string | number, name: string): Promise<boolean> {
         const id = chatId.toString();
-        const entry = this.findVendorEntry(chatId, name);
+        return this.withLock(id, () => {
+            const entry = this.findVendorEntry(chatId, name);
 
-        if (!this.store[id] || !entry) {
-            return false;
-        }
+            if (!this.store[id] || !entry) {
+                return false;
+            }
 
-        delete this.store[id].vendors[entry[0]];
-        this.persist();
-        return true;
+            delete this.store[id].vendors[entry[0]];
+            this.persist();
+            return true;
+        });
     }
 
     removeAllVendors(chatId: string | number): number {

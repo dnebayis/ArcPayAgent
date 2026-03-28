@@ -55,11 +55,11 @@ describe("RiskEngine", () => {
     });
 
     describe("Unusual Amount Detection", () => {
-        it("should flag unusually large amounts", () => {
+        it("should flag unusually large amounts", async () => {
             const { vendorStore, engine } = createRiskEngine();
 
             // Build vendor history with average of 30 USDC
-            vendorStore.saveVendor(1, "aws", "0x001");
+            await vendorStore.saveVendor(1, "aws", "0x001");
             vendorStore.recordPayment(1, "aws", 30);
             vendorStore.recordPayment(1, "aws", 30);
             vendorStore.recordPayment(1, "aws", 30);
@@ -76,10 +76,10 @@ describe("RiskEngine", () => {
             expect(result.flags).toContain("unusual_amount");
         });
 
-        it("should not flag normal amounts", () => {
+        it("should not flag normal amounts", async () => {
             const { vendorStore, engine } = createRiskEngine();
 
-            vendorStore.saveVendor(1, "aws", "0x001");
+            await vendorStore.saveVendor(1, "aws", "0x001");
             vendorStore.recordPayment(1, "aws", 30);
             vendorStore.recordPayment(1, "aws", 30);
 
@@ -112,9 +112,9 @@ describe("RiskEngine", () => {
             expect(result.flags).toContain("vendor_mismatch");
         });
 
-        it("should not flag known vendors", () => {
+        it("should not flag known vendors", async () => {
             const { vendorStore, engine } = createRiskEngine();
-            vendorStore.saveVendor(1, "aws", "0x001");
+            await vendorStore.saveVendor(1, "aws", "0x001");
 
             const invoice: ExtractedInvoice = {
                 vendor: "aws",
@@ -145,9 +145,9 @@ describe("RiskEngine", () => {
             expect(result.flags).toContain("missing_fields");
         });
 
-        it("should not flag complete invoices", () => {
+        it("should not flag complete invoices", async () => {
             const { vendorStore, engine } = createRiskEngine();
-            vendorStore.saveVendor(1, "aws", "0x001");
+            await vendorStore.saveVendor(1, "aws", "0x001");
 
             const invoice: ExtractedInvoice = {
                 vendor: "aws",
@@ -163,9 +163,9 @@ describe("RiskEngine", () => {
     });
 
     describe("Suspicious Language Detection", () => {
-        it("should flag suspicious language", () => {
+        it("should flag suspicious language", async () => {
             const { vendorStore, engine } = createRiskEngine();
-            vendorStore.saveVendor(1, "vendor", "0x001");
+            await vendorStore.saveVendor(1, "vendor", "0x001");
 
             const invoice: ExtractedInvoice = {
                 vendor: "vendor",
@@ -182,9 +182,9 @@ describe("RiskEngine", () => {
     });
 
     describe("Risk Levels", () => {
-        it("should classify safe invoices (score < 0.3)", () => {
+        it("should classify safe invoices (score < 0.3)", async () => {
             const { vendorStore, engine } = createRiskEngine();
-            vendorStore.saveVendor(1, "aws", "0x001");
+            await vendorStore.saveVendor(1, "aws", "0x001");
 
             const invoice: ExtractedInvoice = {
                 vendor: "aws",

@@ -410,6 +410,12 @@ export class PaymentEngine {
         }
     }
 
+    /** Returns the number of transactions still in a non-terminal state. */
+    getInFlightTransactionCount(): number {
+        const records = this.submittedTransactionStore?.list() || [];
+        return records.filter(r => r.status === "creating" || r.status === "submitted").length;
+    }
+
     async reconcileSubmittedTransactions(): Promise<void> {
         const records = this.submittedTransactionStore?.list() || [];
 

@@ -1,4 +1,5 @@
 import TelegramBot from "node-telegram-bot-api";
+import { randomUUID } from "node:crypto";
 import { ConversationMemory } from "../agent/conversationMemory";
 import { LLMKeyStore } from "../storage/llmKeyStore";
 import { requestJsonCompletion, LLMJsonMessage } from "../ai/llmJsonClient";
@@ -6,6 +7,8 @@ import { buildSystemPrompt } from "../ai/systemPrompt";
 import { ResearchTools, ResearchData } from "../tools/researchTools";
 import { WalletStore } from "../storage/walletStore";
 import { sanitizeForTelegram } from "../utils/telegramMarkdown";
+import { validateIntent } from "../ai/intentValidator";
+import { logger } from "../utils/logger";
 
 const SYNTHESIS_PROMPT = `You are a helpful AI assistant. You have fetched live data to answer the user's query.
 Synthesize the provided data into a natural, readable response. Be informative but brief.
@@ -57,7 +60,7 @@ export class Orchestrator {
      * Payment modification during pending payment (e.g. "not 1 eurc, send 10 eurc", "actually make it 50").
      * These should be blocked while a payment is awaiting confirmation.
      */
-    private static readonly PAYMENT_MODIFY_PATTERN = /\b\d+(\.\d+)?\s*(usdc|eurc)\b|\b(instead|change|make it|actually)\b/i;
+    private static readonly PAYMENT_MODIFY_PATTERN = /\b\d+(\.\d+)?\s*(usdc|eurc)\b|(send|pay)\s+\d+\s*(usdc|eurc)/i;
 
     /**
      * Capability queries — intercepted before the LLM to prevent agent_status misrouting.
@@ -70,6 +73,7 @@ export class Orchestrator {
     async handleMessage(chatId: number, text: string): Promise<void> {
         if (!text?.trim()) return;
 
+        const traceId = randomUUID().slice(0, 8);
         this.memory.addUserMessage(chatId, text);
 
         // ── Pending-payment guard ──────────────────────────────────────────────
@@ -134,10 +138,11 @@ export class Orchestrator {
         }, 4000);
 
         let raw: string | null = null;
+        const llmStart = Date.now();
         try {
             raw = await requestJsonCompletion(auth, messages);
         } catch (error: any) {
-            console.error("[Orchestrator] LLM call failed:", error.message);
+            logger.error(traceId, "[Orchestrator] LLM call failed", { chatId, error: error.message });
         } finally {
             clearInterval(typingInterval);
         }
@@ -148,11 +153,18 @@ export class Orchestrator {
             return;
         }
 
+        logger.info(traceId, "[Orchestrator] LLM response received", { chatId, latencyMs: Date.now() - llmStart });
+
         let intent: ParsedIntent;
         try {
-            intent = JSON.parse(raw);
+            const parsed = JSON.parse(raw);
+            const validated = validateIntent(parsed);
+            if (!validated) {
+                throw new Error("Intent validation failed");
+            }
+            intent = validated;
         } catch {
-            console.error("[Orchestrator] Failed to parse LLM response:", raw?.substring(0, 200));
+            logger.warn(traceId, "[Orchestrator] Failed to parse/validate LLM response", { chatId, raw: raw?.substring(0, 200) });
             const errMsg = "I didn't understand that. Could you rephrase?";
             await this.bot.sendMessage(chatId, errMsg);
             this.memory.addBotMessage(chatId, errMsg);

@@ -7,6 +7,8 @@ import { ConversationMemory } from "../agent/conversationMemory";
 import { ScheduleStore } from "../storage/schedules";
 import { UserPreferencesStore } from "../storage/userPreferences";
 import { Orchestrator } from "../core/orchestrator";
+import { RateLimiter } from "../middleware/rateLimiter";
+import { AccessControl } from "../middleware/accessControl";
 
 /**
  * Builds the message to send to the orchestrator after a silent invoice analysis.
@@ -84,16 +86,34 @@ export function setupHandlers(
     paymentRequestEngine?: PaymentRequestEngine,
     conversationMemory?: ConversationMemory,
     scheduleStore?: ScheduleStore,
-    userPreferencesStore?: UserPreferencesStore
+    userPreferencesStore?: UserPreferencesStore,
+    accessControl?: AccessControl,
+    rateLimiter?: RateLimiter
 ) {
     bot.setMyCommands([
         { command: "start", description: "Open the Arc Pay Agent quick start guide" },
-        { command: "help", description: "Show the full command guide" }
+        { command: "help", description: "Show the full command guide" },
+        { command: "reset", description: "Clear your conversation context" }
     ]).catch((error) => {
         console.warn("[Telegram] Failed to register bot commands:", error);
     });
 
+    /** Shared auth + rate-limit gate used by both message and callback handlers. */
+    const isPermitted = (chatId: number): boolean => {
+        if (accessControl && !accessControl.isAllowed(chatId)) {
+            bot.sendMessage(chatId, "⛔ This bot is in private mode. You don't have access.").catch(() => {});
+            return false;
+        }
+        if (rateLimiter && !rateLimiter.allow(chatId)) {
+            bot.sendMessage(chatId, "⏳ You're sending messages too fast — please slow down.").catch(() => {});
+            return false;
+        }
+        return true;
+    };
+
     const handleTextTurn = async (chatId: number, originalText: string): Promise<void> => {
+        if (!isPermitted(chatId)) return;
+
         const text = originalText.toLowerCase().trim();
 
         if (!text) return;
@@ -129,6 +149,13 @@ Follow us: @ArcPayAgent`;
         // /help
         if (text === "/help" || /^help[!?\.]*$/i.test(originalText.trim())) {
             bot.sendMessage(chatId, HELP_MESSAGE, { parse_mode: "Markdown" });
+            return;
+        }
+
+        // /reset — clears full conversation context
+        if (text === "/reset") {
+            conversationMemory?.clearContext(chatId);
+            bot.sendMessage(chatId, "🔄 Conversation context cleared. Starting fresh!");
             return;
         }
 
@@ -279,6 +306,11 @@ Follow us: @ArcPayAgent`;
 
         if (!senderId) {
             await bot.answerCallbackQuery(query.id, { text: "Unable to verify user." });
+            return;
+        }
+
+        if (!isPermitted(senderId)) {
+            await bot.answerCallbackQuery(query.id, { text: "Access denied." });
             return;
         }
 

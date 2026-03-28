@@ -67,6 +67,8 @@ export class InvoiceEngine {
     private static readonly SESSION_TTL_MS = 30 * 60 * 1000;
     private riskEngine: RiskEngine;
     private fxRateService: FxRateService;
+    /** Prevents concurrent invoice analysis for the same chatId */
+    private processingChats: Set<number> = new Set();
 
     constructor(
         private bot: TelegramBot,
@@ -866,6 +868,22 @@ export class InvoiceEngine {
      * Use this when the caller (e.g. Orchestrator) wants to handle the response naturally.
      */
     async processInvoiceSilent(
+        chatId: number,
+        extracted: ExtractedInvoice,
+        metadata?: { sourceMessageId?: number | null; sourceMimeType?: string | null }
+    ): Promise<{ session: InvoiceSessionRecord; error: null } | { session: null; error: string }> {
+        if (this.processingChats.has(chatId)) {
+            return { session: null, error: "An invoice is already being processed. Please wait." };
+        }
+        this.processingChats.add(chatId);
+        try {
+            return await this._processInvoiceSilentInner(chatId, extracted, metadata);
+        } finally {
+            this.processingChats.delete(chatId);
+        }
+    }
+
+    private async _processInvoiceSilentInner(
         chatId: number,
         extracted: ExtractedInvoice,
         metadata?: { sourceMessageId?: number | null; sourceMimeType?: string | null }

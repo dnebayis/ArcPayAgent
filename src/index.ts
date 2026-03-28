@@ -39,11 +39,17 @@ import { AgentIdentityEngine } from "./engines/agentIdentityEngine";
 import { Orchestrator } from "./core/orchestrator";
 import { ToolDispatcher } from "./agent/toolDispatcher";
 import { ResearchTools } from "./tools/researchTools";
+import { RateLimiter } from "./middleware/rateLimiter";
+import { AccessControl } from "./middleware/accessControl";
+import { logger } from "./utils/logger";
 
 dotenv.config();
 process.env.NTBA_FIX_350 = process.env.NTBA_FIX_350 || "1";
 
 let shutdownHandlersRegistered = false;
+
+/** Populated in main() so the shutdown handler can check in-flight payments. */
+let _paymentEngineRef: import("./engines/paymentEngine").PaymentEngine | null = null;
 
 function registerShutdownHandlers(): void {
     if (shutdownHandlersRegistered || process.env.NODE_ENV === "test") {
@@ -51,11 +57,27 @@ function registerShutdownHandlers(): void {
     }
 
     const shutdown = async (signal: string) => {
+        logger.info(null, `[App] ${signal} received — starting graceful shutdown`);
         try {
-            console.log(`[App] ${signal} received. Flushing persistence...`);
+            // Run one final reconciliation pass and report in-flight count
+            if (_paymentEngineRef) {
+                const inFlight = _paymentEngineRef.getInFlightTransactionCount();
+                if (inFlight > 0) {
+                    logger.warn(null, `[App] ${inFlight} in-flight transaction(s) at shutdown — reconciling`);
+                    await Promise.race([
+                        _paymentEngineRef.reconcileSubmittedTransactions(),
+                        new Promise(resolve => setTimeout(resolve, 10_000))
+                    ]);
+                    const remaining = _paymentEngineRef.getInFlightTransactionCount();
+                    if (remaining > 0) {
+                        logger.warn(null, `[App] ${remaining} transaction(s) still unresolved after reconcile — will retry on next boot`);
+                    }
+                }
+            }
             await flushPersistence();
-        } catch (error) {
-            console.error("[App] Failed to flush persistence during shutdown:", error);
+            logger.info(null, "[App] Persistence flushed. Exiting.");
+        } catch (error: any) {
+            logger.error(null, "[App] Error during shutdown", { error: error?.message });
         } finally {
             process.exit(0);
         }
@@ -226,7 +248,7 @@ export async function main() {
                     bot.editMessageText("✅ Payment request completed.", {
                         chat_id: source.originChatId,
                         message_id: source.originMessageId
-                    }).catch(() => { });
+                    }).catch((err: any) => logger.warn(null, "[Bot] editMessageText failed", { error: err?.message }));
                 }
                 return;
             }
@@ -238,7 +260,7 @@ export async function main() {
                     bot.editMessageText(`✅ Scheduled payment completed: ${payment.amountStr} ${schedPayToken} → ${payment.vendorName || payment.beneficiary}`, {
                         chat_id: source.originChatId,
                         message_id: source.originMessageId
-                    }).catch(() => { });
+                    }).catch((err: any) => logger.warn(null, "[Bot] editMessageText failed", { error: err?.message }));
                 }
                 return;
             }
@@ -250,14 +272,14 @@ export async function main() {
                     bot.editMessageText(`✅ Invoice payment completed: ${payment.amountStr} ${invPayToken} → ${payment.vendorName || payment.beneficiary}`, {
                         chat_id: source.originChatId,
                         message_id: source.originMessageId
-                    }).catch(() => { });
+                    }).catch((err: any) => logger.warn(null, "[Bot] editMessageText failed", { error: err?.message }));
                 }
             }
         },
         (chatId, payment, reason) => {
-            // Always clear the stale lastAction so the orchestrator's pending-payment
-            // guards (confirm / cancel / modify) stop firing after the payment resolves.
-            conversationMemory.setLastAction(chatId, "payment_cleared");
+            // Clear transient action/payment/invoice context so the orchestrator's
+            // pending-payment guards stop firing after the payment resolves.
+            conversationMemory.clearTemporaryContext(chatId);
 
             const source = payment.source;
             if (!source || source.type !== "invoice") return;
@@ -272,6 +294,7 @@ export async function main() {
 
     // Fix scheduler with payment engine reference
     (schedulerService as any).paymentEngine = paymentEngine;
+    _paymentEngineRef = paymentEngine;
 
     // ── Internal toolset ─────────────────────────────────────────────────────
     const internalToolset = new InternalToolset({
@@ -319,6 +342,11 @@ export async function main() {
     );
 
     // ── Telegram handlers ────────────────────────────────────────────────────
+    const rateLimiter = new RateLimiter();
+    const accessControl = new AccessControl(config.ALLOWED_CHAT_IDS);
+    // Prune stale rate-limit windows every 5 minutes
+    setInterval(() => rateLimiter.prune(), 5 * 60 * 1000);
+
     setupHandlers(
         bot,
         walletStore,
@@ -329,7 +357,9 @@ export async function main() {
         paymentRequestEngine,
         conversationMemory,
         scheduleStore,
-        userPreferencesStore
+        userPreferencesStore,
+        accessControl,
+        rateLimiter
     );
     markBotReady();
 

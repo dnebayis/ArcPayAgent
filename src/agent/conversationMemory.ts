@@ -43,7 +43,10 @@ export interface ConversationContext {
     messages: { role: "user" | "assistant"; content: string }[];
 }
 
-const MAX_MESSAGES = 20;
+const MAX_MESSAGES = 30;
+/** When the buffer hits this size, oldest messages are compressed into a summary line. */
+const SUMMARIZE_THRESHOLD = 30;
+const SUMMARIZE_KEEP = 20;
 
 export class ConversationMemory {
     private memory: Record<string, ConversationContext> = {};
@@ -60,18 +63,51 @@ export class ConversationMemory {
     addUserMessage(chatId: number, text: string): void {
         const ctx = this.ensure(chatId);
         ctx.messages.push({ role: "user", content: text });
-        if (ctx.messages.length > MAX_MESSAGES) {
-            ctx.messages = ctx.messages.slice(-MAX_MESSAGES);
-        }
+        this.compressIfNeeded(ctx);
     }
 
     /** Add a bot response to history */
     addBotMessage(chatId: number, text: string): void {
         const ctx = this.ensure(chatId);
         ctx.messages.push({ role: "assistant", content: text });
-        if (ctx.messages.length > MAX_MESSAGES) {
-            ctx.messages = ctx.messages.slice(-MAX_MESSAGES);
+        this.compressIfNeeded(ctx);
+    }
+
+    /**
+     * When the message buffer is full, replace the oldest batch with a single
+     * deterministic summary line — no LLM call needed.
+     */
+    private compressIfNeeded(ctx: ConversationContext): void {
+        if (ctx.messages.length <= SUMMARIZE_THRESHOLD) return;
+
+        const toCompress = ctx.messages.slice(0, SUMMARIZE_THRESHOLD - SUMMARIZE_KEEP);
+        const summary = this.buildSummaryLine(ctx);
+        ctx.messages = [
+            { role: "assistant", content: `[Session context: ${summary}]` },
+            ...ctx.messages.slice(toCompress.length)
+        ];
+    }
+
+    /**
+     * Build a compact, deterministic summary string from the current context fields.
+     * Used as the compression artefact so older turns are not lost entirely.
+     */
+    private buildSummaryLine(ctx: ConversationContext): string {
+        const parts: string[] = [];
+        if (ctx.lastPayment) {
+            const tok = ctx.lastPayment.token ?? "USDC";
+            parts.push(`last payment: ${ctx.lastPayment.amount} ${tok} to ${ctx.lastPayment.beneficiary}`);
         }
+        if (ctx.lastSchedule) {
+            parts.push(`last schedule: ${ctx.lastSchedule.amount} USDC to ${ctx.lastSchedule.beneficiary}`);
+        }
+        if (ctx.lastVendor) {
+            parts.push(`last vendor: ${ctx.lastVendor.name}`);
+        }
+        if (ctx.lastInvoice?.vendor) {
+            parts.push(`last invoice: ${ctx.lastInvoice.vendor} ${ctx.lastInvoice.settlementAmount ?? ctx.lastInvoice.amount} USDC`);
+        }
+        return parts.length > 0 ? parts.join("; ") : "earlier conversation compressed";
     }
 
     /** Store the last analyzed invoice */
@@ -111,11 +147,30 @@ export class ConversationMemory {
         this.ensure(chatId).lastAction = action;
     }
 
+    /**
+     * Clear only the transient action/payment/invoice/schedule/vendor context.
+     * Preserves conversation history and language preference.
+     * Call this after a payment resolves (confirmed / cancelled / failed) so
+     * orchestrator guards don't misfire on the next message.
+     */
+    clearTemporaryContext(chatId: number): void {
+        const ctx = this.ensure(chatId);
+        ctx.lastAction = undefined;
+        ctx.lastPayment = undefined;
+        ctx.lastInvoice = undefined;
+        ctx.lastSchedule = undefined;
+        ctx.lastVendor = undefined;
+    }
+
     /** Get full context for the user */
     getContext(chatId: number): ConversationContext {
         return this.ensure(chatId);
     }
 
+    /**
+     * Full reset — wipes all memory including message history.
+     * Used by /reset command.
+     */
     clearContext(chatId: number): void {
         const id = chatId.toString();
         delete this.memory[id];

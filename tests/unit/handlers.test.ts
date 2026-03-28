@@ -308,14 +308,15 @@ describe("Telegram handlers message flow", () => {
         expect(bot.sendMessage).not.toHaveBeenCalled();
     });
 
-    it("should forward unrecognized slash commands to orchestrator", async () => {
+    it("should handle /reset command by clearing conversation context", async () => {
         await listeners.message({
             chat: { id: 1 },
             text: "/reset"
         });
 
-        // /reset is not a built-in command — it's forwarded to the orchestrator
-        expect(orchestrator.handleMessage).toHaveBeenCalledWith(1, "/reset");
+        // /reset is a built-in command — it clears context and does NOT forward to orchestrator
+        expect(conversationMemory.clearContext).toHaveBeenCalledWith(1);
+        expect(orchestrator.handleMessage).not.toHaveBeenCalled();
     });
 
     it("should route text messages to orchestrator", async () => {
