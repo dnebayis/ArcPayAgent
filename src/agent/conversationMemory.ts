@@ -6,7 +6,7 @@
 import { loadStore, saveStore } from "../storage/persistence";
 import { EpisodicMemory } from "./episodicMemory";
 
-export type FlowStateName = "idle" | "payment_awaiting_confirmation" | "invoice_awaiting_override";
+export type FlowStateName = "idle" | "payment_awaiting_confirmation";
 
 export interface FlowState {
     name: FlowStateName;

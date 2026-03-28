@@ -9,6 +9,7 @@ import { UserPreferencesStore } from "../storage/userPreferences";
 import { Orchestrator } from "../core/orchestrator";
 import { RateLimiter } from "../middleware/rateLimiter";
 import { AccessControl } from "../middleware/accessControl";
+import { logger } from "../utils/logger";
 
 /**
  * Builds the message to send to the orchestrator after a silent invoice analysis.
@@ -354,24 +355,32 @@ Follow us: @ArcPayAgent`;
             }
 
             invoiceEngine.storeInvoice(ownerChatId, session.invoice);
-            bot.editMessageText("Preparing payment from invoice...", {
+            await bot.editMessageText("Preparing payment from invoice...", {
                 chat_id: chatId,
                 message_id: query.message.message_id
-            });
+            }).catch(() => { });
 
             invoiceEngine.markSessionAwaitingPaymentConfirmation(ownerChatId, session.id);
             const beneficiary = session.resolution.matchedVendorName || session.invoice.vendor;
-            paymentEngine.preparePayment(ownerChatId, beneficiary, session.invoice.amount, `Invoice ${session.invoice.invoiceNumber || "N/A"}`, {
-                source: {
-                    type: "invoice",
-                    invoiceNumber: session.invoice.invoiceNumber || null,
-                    invoiceSessionId: session.id,
-                    riskLevelAtPreparation: session.risk?.level || null,
-                    requiredOverride: false,
-                    originChatId: chatId,
-                    originMessageId: query.message.message_id
-                }
-            });
+            try {
+                await paymentEngine.preparePayment(ownerChatId, beneficiary, session.invoice.amount, `Invoice ${session.invoice.invoiceNumber || "N/A"}`, {
+                    source: {
+                        type: "invoice",
+                        invoiceNumber: session.invoice.invoiceNumber || null,
+                        invoiceSessionId: session.id,
+                        riskLevelAtPreparation: session.risk?.level || null,
+                        requiredOverride: false,
+                        originChatId: chatId,
+                        originMessageId: query.message.message_id
+                    }
+                });
+            } catch (err: unknown) {
+                logger.error(null, "[Handler] Invoice preparePayment failed", {
+                    chatId: ownerChatId,
+                    error: err instanceof Error ? err.message : String(err),
+                });
+                await bot.sendMessage(ownerChatId, "❌ Failed to prepare invoice payment. Please try again.");
+            }
             return;
         }
 
@@ -383,10 +392,10 @@ Follow us: @ArcPayAgent`;
                 return;
             }
             invoiceEngine.closeSession(ownerChatId, "cancelled");
-            bot.editMessageText("Invoice cancelled.", {
+            await bot.editMessageText("Invoice cancelled.", {
                 chat_id: chatId,
                 message_id: query.message.message_id
-            });
+            }).catch(() => { });
             return;
         }
 
@@ -409,42 +418,54 @@ Follow us: @ArcPayAgent`;
                 return;
             }
             if (request.paid) {
-                bot.editMessageText("This payment request has already been completed.", {
+                await bot.editMessageText("This payment request has already been completed.", {
                     chat_id: chatId,
                     message_id: query.message.message_id
-                });
+                }).catch(() => { });
                 return;
             }
-            bot.answerCallbackQuery(query.id, { text: "Opening payment confirmation..." });
-            paymentEngine.preparePayment(
-                ownerChatId,
-                request.recipient,
-                request.amount.toString(),
-                `PayReq ${requestId}`,
-                {
-                    source: {
-                        type: "request",
-                        requestId,
-                        originChatId: chatId,
-                        originMessageId: query.message.message_id
+            await bot.answerCallbackQuery(query.id, { text: "Opening payment confirmation..." }).catch(() => { });
+            try {
+                await paymentEngine.preparePayment(
+                    ownerChatId,
+                    request.recipient,
+                    request.amount.toString(),
+                    `PayReq ${requestId}`,
+                    {
+                        source: {
+                            type: "request",
+                            requestId,
+                            originChatId: chatId,
+                            originMessageId: query.message.message_id
+                        }
                     }
-                }
-            );
+                );
+            } catch (err: unknown) {
+                logger.error(null, "[Handler] PayReq preparePayment failed", {
+                    chatId: ownerChatId,
+                    error: err instanceof Error ? err.message : String(err),
+                });
+                await bot.sendMessage(ownerChatId, "❌ Failed to prepare payment. Please try again.");
+            }
             return;
         }
 
         // Payment request: cancel
-        if (data.startsWith("reqcancel_")) {
+        if (data.startsWith("reqcancel_") && paymentRequestEngine) {
             const parts = data.split("_");
             const ownerChatId = parseInt(parts[1], 10);
+            const requestId = parts[2];
             if (!Number.isInteger(ownerChatId) || ownerChatId !== senderId) {
                 await rejectUnauthorized();
                 return;
             }
-            bot.editMessageText("Payment request cancelled.", {
+            if (requestId) {
+                paymentRequestEngine.cancelRequest(requestId);
+            }
+            await bot.editMessageText("Payment request cancelled.", {
                 chat_id: chatId,
                 message_id: query.message.message_id
-            });
+            }).catch(() => { });
             return;
         }
 
@@ -459,24 +480,32 @@ Follow us: @ArcPayAgent`;
             }
             const schedule = scheduleStore.getScheduleById(ownerChatId, scheduleId);
             if (schedule) {
-                bot.answerCallbackQuery(query.id, { text: "Opening scheduled payment confirmation..." });
-                paymentEngine.preparePayment(
-                    ownerChatId,
-                    schedule.vendor,
-                    schedule.amount.toString(),
-                    "Scheduled",
-                    {
-                        token: schedule.token ?? "USDC",
-                        source: {
-                            type: "schedule",
-                            scheduleId,
-                            originChatId: chatId,
-                            originMessageId: query.message.message_id
+                await bot.answerCallbackQuery(query.id, { text: "Opening scheduled payment confirmation..." }).catch(() => { });
+                try {
+                    await paymentEngine.preparePayment(
+                        ownerChatId,
+                        schedule.vendor,
+                        schedule.amount.toString(),
+                        "Scheduled",
+                        {
+                            token: schedule.token ?? "USDC",
+                            source: {
+                                type: "schedule",
+                                scheduleId,
+                                originChatId: chatId,
+                                originMessageId: query.message.message_id
+                            }
                         }
-                    }
-                );
+                    );
+                } catch (err: unknown) {
+                    logger.error(null, "[Handler] Schedule preparePayment failed", {
+                        chatId: ownerChatId,
+                        error: err instanceof Error ? err.message : String(err),
+                    });
+                    await bot.sendMessage(ownerChatId, "❌ Failed to prepare scheduled payment. Please try again.");
+                }
             } else {
-                bot.answerCallbackQuery(query.id, { text: "Schedule not found." });
+                await bot.answerCallbackQuery(query.id, { text: "Schedule not found." }).catch(() => { });
             }
             return;
         }
@@ -490,11 +519,14 @@ Follow us: @ArcPayAgent`;
                 await rejectUnauthorized();
                 return;
             }
-            scheduleStore.cancelSchedule(ownerChatId, scheduleId);
-            bot.editMessageText("❌ Scheduled payment cancelled.", {
+            const wasCancelled = scheduleStore.cancelSchedule(ownerChatId, scheduleId);
+            const cancelMsg = wasCancelled
+                ? "❌ Scheduled payment cancelled."
+                : "Schedule not found or already cancelled.";
+            await bot.editMessageText(cancelMsg, {
                 chat_id: chatId,
                 message_id: query.message.message_id
-            });
+            }).catch(() => { });
             return;
         }
 

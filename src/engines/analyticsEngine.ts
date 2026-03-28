@@ -2,6 +2,7 @@ import TelegramBot from "node-telegram-bot-api";
 import { PaymentLogStore, PaymentLogEntry } from "../storage/paymentLogs";
 import { formatUsdcAmount } from "../utils/formatUsdcAmount";
 import { escapeTelegramMarkdown } from "../utils/telegramMarkdown";
+import { logger } from "../utils/logger";
 
 export type MessageCallback = (chatId: number, msg: string) => void;
 
@@ -16,9 +17,15 @@ export class AnalyticsEngine {
         const args: [number, string, TelegramBot.SendMessageOptions?] = opts
             ? [chatId, msg, opts]
             : [chatId, msg];
-        await this.bot.sendMessage(...args).catch(() =>
-            this.bot.sendMessage(chatId, msg)
-        );
+        await this.bot.sendMessage(...args).catch((firstErr: unknown) => {
+            // Strip parse_mode on retry (most common cause of 400 errors on malformed markdown)
+            logger.warn(null, "[AnalyticsEngine] sendMessage failed, retrying without parse_mode", {
+                chatId,
+                error: firstErr instanceof Error ? firstErr.message : String(firstErr),
+                preview: msg.slice(0, 80),
+            });
+            return this.bot.sendMessage(chatId, msg);
+        });
         this.onMessage?.(chatId, msg);
     }
 

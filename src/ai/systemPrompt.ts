@@ -74,6 +74,7 @@ Research:
 - agent_status:           {"action":"agent_status","message":"..."}
 - agent_identity:         {"action":"agent_identity","message":"..."}
 - agent_validation_status:{"action":"agent_validation_status","message":"..."}
+- status:                 {"action":"status","message":"..."} — operational overview: all schedules, recent payments, balance, active alerts in one snapshot
 
 ### Live Research
 - get_crypto_prices:    {"action":"get_crypto_prices","message":"...","symbols":["BTC","ETH"]}

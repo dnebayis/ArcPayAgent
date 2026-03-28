@@ -53,4 +53,11 @@ export class PaymentRequestStore {
     isPaid(requestId: string): boolean {
         return !!this.store[requestId]?.paid;
     }
+
+    cancelRequest(requestId: string): boolean {
+        if (!this.store[requestId] || this.store[requestId].paid) return false;
+        delete this.store[requestId];
+        this.persist();
+        return true;
+    }
 }

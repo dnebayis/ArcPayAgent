@@ -33,6 +33,14 @@ export const TERMINAL_ACTIONS = new Set([
     "cancel_all_schedules",
     "save_vendor",
     "remove_vendor",
+    "remove_all_vendors",
+    "watch_payments_enable",
+    "watch_payments_disable",
+    "set_price_alert",
+    "remove_price_alert",
+    "remove_all_price_alerts",
+    "export_wallet",
+    "analyze_invoice",
     // Data-display actions — engine sends formatted message directly; loop must stop here
     // to prevent the LLM generating a second (fabricated) response
     "list_schedules",

@@ -231,6 +231,7 @@ export class Orchestrator {
                         ...(toolResp.toolArgs as object)
                     };
                     await this.handleResearch(chatId, intent, text, auth);
+                    this.memory.setLastAction(chatId, toolResp.toolName);
                     break;
                 }
 
@@ -376,6 +377,7 @@ export class Orchestrator {
                 this.memory.addBotMessage(chatId, intent.message);
             }
             await this.handleResearch(chatId, intent, text, auth);
+            this.memory.setLastAction(chatId, intent.action!);
             return;
         }
 

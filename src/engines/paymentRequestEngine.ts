@@ -80,4 +80,11 @@ export class PaymentRequestEngine {
     getRequest(requestId: string) {
         return this.requestStore.getRequest(requestId);
     }
+
+    /**
+     * Cancel a pending (unpaid) payment request. Returns false if not found or already paid.
+     */
+    cancelRequest(requestId: string): boolean {
+        return this.requestStore.cancelRequest(requestId);
+    }
 }

@@ -91,7 +91,7 @@ export class ToolDispatcher {
                 const frequency = (["once", "weekly", "monthly"].includes(String(intent.frequency || ""))
                     ? intent.frequency as string
                     : "once");
-                const scheduled = await this.createSchedule(chatId, beneficiary, amount, intent);
+                const scheduled = await this.createSchedule(chatId, beneficiary, amount, scheduleToken, intent);
                 // createSchedule returns false when it exits early (vendor not found, etc.)
                 if (!scheduled) return "";
                 memory.recordEpisodicEvent(chatId, `scheduled payment: ${amount} ${scheduleToken} to ${beneficiary} (${frequency})`);
@@ -198,8 +198,7 @@ export class ToolDispatcher {
             }
 
             case "remove_all_vendors": {
-                const { vendorStore: vs } = this.deps;
-                const count = vs.removeAllVendors(chatId);
+                const count = vendorStore.removeAllVendors(chatId);
                 if (count === 0) {
                     await this.reply(chatId, "No vendors to remove.");
                 } else {
@@ -509,6 +508,7 @@ export class ToolDispatcher {
         chatId: number,
         beneficiary: string,
         amount: number,
+        token: "USDC" | "EURC",
         intent: ParsedIntent
     ): Promise<boolean> {
         const { vendorStore, scheduleStore, userPreferencesStore, memory } = this.deps;
@@ -532,8 +532,7 @@ export class ToolDispatcher {
             ? intent.frequency as "once" | "weekly" | "monthly"
             : "once");
 
-        const scheduleToken = (intent.token === "EURC") ? "EURC" : "USDC";
-        const schedule = scheduleStore.createSchedule(chatId, beneficiary, scheduleAddress, amount, nextExecution, frequency, scheduleToken);
+        const schedule = scheduleStore.createSchedule(chatId, beneficiary, scheduleAddress, amount, nextExecution, frequency, token);
         memory.setLastSchedule(chatId, schedule.vendor, schedule.amount.toString(), schedule.nextExecution, schedule.id);
 
         const preferences = userPreferencesStore.getPreferences(chatId);
