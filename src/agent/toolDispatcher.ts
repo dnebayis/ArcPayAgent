@@ -53,7 +53,7 @@ export class ToolDispatcher {
         switch (action) {
             // ── Payment ────────────────────────────────────────────────
             case "create_payment": {
-                const beneficiary = intent.beneficiary ? String(intent.beneficiary) : null;
+                let beneficiary = intent.beneficiary ? String(intent.beneficiary) : null;
                 const amount = intent.amount != null ? String(intent.amount) : null;
                 if (!beneficiary || !amount) {
                     if (!intent.message) {
@@ -61,6 +61,8 @@ export class ToolDispatcher {
                     }
                     return "";
                 }
+                // Resolve self-address references before passing to payment engine
+                beneficiary = this.resolveSelfAddress(chatId, beneficiary) ?? beneficiary;
                 const token = (intent.token === "EURC") ? "EURC" : "USDC";
                 await paymentEngine.preparePayment(chatId, beneficiary, amount, intent.memo ? String(intent.memo) : "ArcPay", { origin: "byok", token });
                 // preparePayment may return early (vendor not found, bad address, etc.) without
@@ -75,7 +77,7 @@ export class ToolDispatcher {
 
             // ── Schedule ───────────────────────────────────────────────
             case "schedule_payment": {
-                const beneficiary = intent.beneficiary ? String(intent.beneficiary) : null;
+                let beneficiary = intent.beneficiary ? String(intent.beneficiary) : null;
                 const amount = intent.amount != null ? Number(intent.amount) : null;
                 if (!beneficiary || !amount) {
                     if (!intent.message) {
@@ -83,6 +85,8 @@ export class ToolDispatcher {
                     }
                     return "";
                 }
+                // Resolve self-address references before passing to schedule engine
+                beneficiary = this.resolveSelfAddress(chatId, beneficiary) ?? beneficiary;
                 const scheduleToken = (intent.token === "EURC") ? "EURC" : "USDC";
                 const frequency = (["once", "weekly", "monthly"].includes(String(intent.frequency || ""))
                     ? intent.frequency as string
@@ -482,6 +486,23 @@ export class ToolDispatcher {
                 return "";
             }
         }
+    }
+
+    /**
+     * Detects self-address phrases (e.g. "my address", "kendi adresim") and
+     * returns the user's actual wallet address. Returns null if no match.
+     */
+    private resolveSelfAddress(chatId: number, beneficiary: string): string | null {
+        const SELF_PATTERNS = [
+            /\bmy (wallet|address|wallet address|own address|own wallet)\b/i,
+            /\bkendi (adresim|cüzdanım|cüzdan adresim|cüzdan adresime)\b/i,
+            /\bkendi adres(im|ine|e)\b/i,
+            /\bbenim (adresim|cüzdanım)\b/i,
+        ];
+        const isSelf = SELF_PATTERNS.some(re => re.test(beneficiary));
+        if (!isSelf) return null;
+        const address = this.deps.walletStore.getWalletAddress(chatId);
+        return address ?? null;
     }
 
     private async createSchedule(

@@ -107,7 +107,15 @@ Research:
 - Fiat-to-fiat conversion ("1000 TRY in USD?", "EUR/GBP rate?") → get_fx_rate with ISO 4217 codes. NEVER crypto tickers here.
 
 **Wallet / Balance:**
-- "how much USDC/EURC?" / "what's in my wallet?" → show_wallet (NEVER get_crypto_prices).
+- "how much USDC/EURC?" / "what's in my wallet?" / "show my address" → show_wallet (NEVER get_crypto_prices).
+- "deep analysis" / "detailed portfolio" / "derinlemesine analiz" / "derin analiz" / "wallet intelligence" → wallet_intelligence (NOT show_wallet).
+
+**Analytics:**
+- "analyze my spending" / "spending breakdown" / "who do I pay?" → spending_by_vendor
+- "monthly" / "month by month" / "aylık" / "her ay" → monthly_spending
+- "spending report" / "total spending" / "how much did I pay?" / "ne kadar ödedim" → report
+- "all-time summary" / "account overview" / "hesap özeti" → account_summary
+- "recent payments" / "payment history" / "son ödemeler" → show_recent_payments
 
 **Repeat payment:**
 - "do it again" / "same again" / "send it again" + lastPayment exists → create_payment with lastPayment values.
@@ -131,6 +139,7 @@ Research:
 - "do it again" / "same" → repeat lastPayment
 - "that vendor" → lastVendor
 - "the last one" / "previous" → infer from context
+- "my address" / "my wallet" / "kendi adresim" / "kendi cüzdanım" / "kendi cüzdan adresime" as a payment RECIPIENT → use the wallet address shown in context (lastWallet). Do NOT treat it as a vendor name.
 
 **Invoice risk flags — explain naturally when asked:**
 - duplicate_invoice: same invoice number seen before
@@ -268,6 +277,7 @@ const SLIM_SYSTEM_PROMPT = `You are ArcPay Agent — an AI payment assistant on 
 - "do it again" / "same" → repeat lastPayment
 - "that vendor" → lastVendor
 - "the last one" / "previous" → infer from context
+- "my address" / "my wallet" / "kendi adresim" / "kendi cüzdanım" / "kendi cüzdan adresime" as a payment RECIPIENT → use the wallet address shown in context (lastWallet). Do NOT treat it as a vendor name.
 
 **Invoice risk flags — explain naturally when asked:**
 - duplicate_invoice: same invoice number seen before
