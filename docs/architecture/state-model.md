@@ -1,58 +1,107 @@
 # State Model
 
+## FlowState
+
+FlowState is the primary execution guard in the orchestrator.
+
+Stored in `conversationMemory.ts` per user.
+
+Values:
+
+| State | Meaning |
+|---|---|
+| `idle` | No active multi-turn flow. Normal LLM routing. |
+| `payment_awaiting_confirmation` | A payment card is displayed. Orchestrator blocks new payment requests. |
+| `invoice_awaiting_override` | An invoice is `review_required`. Override must come before payment prep. |
+
+Lifecycle:
+
+- `payment_awaiting_confirmation` is set only when `paymentEngine.preparePayment()` actually produces a card (non-empty return). Early exits (vendor not found, bad address) do not set this state.
+- The state is cleared on Confirm, Cancel, or `/reset`.
+
 ## Conversation memory
 
-Conversation memory is now secondary context, not execution truth.
+Per-user in-memory store. Not persisted across restarts.
 
-It helps with:
+Contains:
 
-- conversational recall
-- planner context
-- recent entity references
+- recent user / assistant messages (last 30)
+- `lastAction` — last executed action name (fallback for pre-FlowState compatibility)
+- `lastPayment` — last payment amount and recipient for conversational follow-up
+- `lastVendor` — last vendor name touched
+- `lastSchedule` — last schedule created
+- `lastInvoice` — last analyzed invoice (recall only — does not reopen invoice sessions)
+- `flowState` — current FlowState
 
-## Session runtime
+When the 30-message buffer fills, the oldest 10 messages are replaced with a synthetic summary assistant turn so context is not silently lost.
 
-Session runtime owns:
+## Episodic memory
 
-- pending payment confirmation
-- pending intent slot collection
-- pending references
-- last resolved entities
+Compact event log per user.
 
-This is the main owner for product follow-ups.
+Stored in `episodicMemory.ts`.
 
-Examples:
+Each significant action (payment confirmed, vendor saved, schedule created) appends a short event entry. The last ~20 events are summarized and injected into the LLM context as background history.
 
-- payment waiting for confirmation
-- pending intent slot collection
-- recent payment index for referential history turns
-- pending reference target
+## Pending payment
 
-## Task runtime
+Stored before user confirmation.
 
-Task runtime tracks broader conversational progress, especially where planner or runtime needs to know whether a follow-up is still in scope.
+Used for:
+
+- Confirm button
+- Cancel button
+- amount / vendor / memo update (inline keyboard)
+
+Persisted in `pendingPayments.ts`. Survives restarts.
+
+Invoice-derived pending payments carry source metadata so the invoice session can close after successful payment.
+
+## Submitted transaction
+
+Stored after payment submission starts.
+
+Used for:
+
+- duplicate submit prevention
+- delayed Circle reconciliation
+- restart recovery
+
+Persisted in `submittedTransactions.ts`.
+
+## Confirmed payment log
+
+Stored only after successful terminal completion.
+
+Used for:
+
+- payment history
+- analytics
+- vendor totals
+
+Persisted in `paymentLogs.ts`.
 
 ## Invoice session
 
-Invoice session is the execution truth for invoice-specific behavior:
+Owned by `InvoiceEngine`.
 
-- risk state
-- review requirement
-- override requirement
-- readiness to prepare payment
-- post-pay closure
+States:
 
-## Persistence
+| State | Meaning |
+|---|---|
+| `processing` | Upload received, extraction in progress |
+| `ready` | Extraction complete, no risk issues |
+| `review_required` | Risk flags found; explicit override needed before payment prep |
+| `awaiting_payment_confirmation` | Payment card is open for this invoice |
+| `paid` | Payment confirmed; session closed |
+| `cancelled` | User cancelled; session closed |
 
-The current runtime persists key transactional surfaces such as:
+The invoice session is the execution truth for invoice-specific behavior. `lastInvoice` in conversation memory is recall-only — it does not reopen an invoice session.
 
-- wallets
-- vendors
-- schedules
-- payment logs
-- pending payments
-- submitted Circle transactions
+## Persistence backend
 
-It also persists agent identity state, including the last known validation status. When that local state is lost, the identity engine now re-derives the canonical KYC validation request hash from the registered `agentId` and recovers the onchain validation result.
+Default: SQLite.
 
-Default backend is SQLite. PostgreSQL is enabled through `DATABASE_URL`.
+PostgreSQL enabled with `DATABASE_URL` env var.
+
+The abstraction lives in `src/storage/persistence.ts`.

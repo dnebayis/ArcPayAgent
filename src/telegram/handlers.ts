@@ -448,25 +448,6 @@ Follow us: @ArcPayAgent`;
             return;
         }
 
-        // Schedule: pick cancel
-        if (data.startsWith("pick_cancel_sched_") && scheduleStore) {
-            const parts = data.replace("pick_cancel_sched_", "").split("_");
-            const ownerChatId = parseInt(parts[0], 10);
-            const scheduleId = parts.slice(1).join("_");
-            if (!Number.isInteger(ownerChatId) || ownerChatId !== senderId) {
-                await rejectUnauthorized();
-                return;
-            }
-            await bot.answerCallbackQuery(query.id, { text: "Cancelling selected schedule..." });
-            await bot.editMessageText(`Cancelling schedule ${scheduleId}...`, {
-                chat_id: chatId,
-                message_id: query.message.message_id
-            });
-            scheduleStore.cancelSchedule(ownerChatId, scheduleId);
-            await bot.sendMessage(ownerChatId, `❌ Scheduled payment ${scheduleId} cancelled.`);
-            return;
-        }
-
         // Schedule: pay now
         if (data.startsWith("sched_pay_") && paymentEngine && scheduleStore) {
             const parts = data.replace("sched_pay_", "").split("_");

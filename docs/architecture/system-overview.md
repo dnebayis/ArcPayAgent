@@ -5,13 +5,18 @@
 ```mermaid
 flowchart TD
     A[Telegram message] --> B[src/telegram/handlers.ts]
-    B --> C[src/runtime/runtimeOrchestrator.ts]
-    C --> D[taskInterpreter]
-    D --> E[conversationPolicy]
-    E -->|planner lane| F[AgentPlanner]
-    E -->|deterministic lane| G[executionBoundary]
-    G --> H[engines and internal tools]
-    H --> I[Telegram reply]
+    B -->|text turn| O[src/core/orchestrator.ts]
+    O --> FS{FlowState guard}
+    FS -->|payment_awaiting_confirmation| BLOCK[Block / redirect user]
+    FS -->|idle| LLM[LLM — JSON or tool call]
+    LLM --> O
+    O -->|send message| TG[Telegram reply]
+    O -->|dispatch action| D[src/agent/toolDispatcher.ts]
+    D --> EN[Engines and stores]
+    EN --> TG
+    W[WatchService 30s] -->|incoming payment| TG
+    AL[AlertService 60s] -->|price alert| TG
+    SC[SchedulerService 10s] -->|schedule due| TG
 ```
 
 ## Main layers
@@ -20,30 +25,41 @@ flowchart TD
 
 Handles:
 
-- incoming text
-- media upload
-- callbacks
-- composed invoice upload behavior
+- incoming text turns
+- media upload (invoice PDF and photo)
+- callback queries (confirm / cancel / schedule actions)
+- command registration
 
-### Runtime layer
-
-Owns:
-
-- interpreter-first turn routing
-- session-aware follow-up handling
-- deterministic conversation policy
-
-### Engine layer
+### Orchestrator layer (`src/core/orchestrator.ts`)
 
 Owns:
 
-- payment execution
+- FlowState guard — blocks or redirects while `payment_awaiting_confirmation`
+- capability query interception (no LLM needed)
+- LLM call — either JSON mode (`handleMessageWithJson`) or native tool calling (`handleMessageWithTools`)
+- `isFabricatedMessage` — suppresses LLM-fabricated data in data-display responses
+- dispatch to `ToolDispatcher`
+- live research via `ResearchTools`
+
+### Agent layer (`src/agent/`)
+
+Owns:
+
+- tool dispatch (`toolDispatcher.ts`) — maps validated actions to engine methods
+- conversation memory (`conversationMemory.ts`) — messages, flowState, lastAction, lastPayment, lastVendor, lastSchedule, lastInvoice
+- episodic memory (`episodicMemory.ts`) — compact session summaries
+
+### Engine layer (`src/engines/`)
+
+Owns:
+
+- payment execution and confirmation lifecycle
 - invoice extraction and session lifecycle
 - payment requests
 - analytics and risk
 - agent identity, reputation, and validation recovery
 
-### Storage layer
+### Storage layer (`src/storage/`)
 
 Owns:
 
@@ -52,7 +68,7 @@ Owns:
 - pending payments
 - payment logs
 - schedules
-- persistence backend
+- persistence backend (SQLite or PostgreSQL)
 
 ## Main modules
 
@@ -63,35 +79,44 @@ Composition root for:
 - config loading
 - persistence bootstrap
 - store and engine creation
-- tool registration
-- health server and scheduler startup
+- orchestrator and tool dispatcher wiring
+- health server and background service startup
 
 ### `src/telegram/`
 
 Transport layer for:
 
-- commands
-- uploads
-- callbacks
-- runtime-first ingress
+- commands (`/start`, `/help`, `/llmkey`, `/reset`)
+- invoice uploads
+- callback query flows
+- text ingress to orchestrator
 
-### `src/runtime/`
+### `src/core/orchestrator.ts`
 
-Conversation shell for:
+Single-file runtime for:
 
-- interpretation
-- policy
-- execution boundary
-- session and task state
+- FlowState guard (payment_awaiting_confirmation, invoice_awaiting_override)
+- LLM call and intent parse/validate
+- fabricated message suppression (`isFabricatedMessage`)
+- action dispatch
+- TERMINAL_ACTIONS loop break
 
 ### `src/agent/`
 
-Planner and tooling layer for:
+Tool dispatch and memory:
 
-- planner
-- tool registry and router
-- internal tools
-- memory and task store
+- `toolDispatcher.ts` — maps actions to engines
+- `conversationMemory.ts` — per-user state including FlowState
+- `episodicMemory.ts` — compact session event log
+
+### `src/ai/`
+
+LLM client and prompts:
+
+- `llmJsonClient.ts` — JSON and native tool calling modes
+- `systemPrompt.ts` — BASE (JSON) and SLIM (tool calling) prompts
+- `toolDefinitions.ts` — canonical tool schemas, TERMINAL_ACTIONS set
+- `intentValidator.ts` — validates LLM output before dispatch
 
 ### `src/engines/`
 
@@ -101,26 +126,44 @@ Domain engines for:
 - invoices
 - analytics
 - risk
+- agent identity
+
+### `src/services/`
+
+Background services:
+
+- `scheduler.ts` — due schedule reminders every 10s
+- `watchService.ts` — incoming payment polling every 30s
+- `alertService.ts` — crypto price alert polling every 60s
+- `fxRateService.ts` — ECB FX rate helper
 
 ## Walkthroughs
 
-### Planner-first help turn
+### Conversational turn
 
-1. user asks for broad help
-2. interpreter frames planner-style help
-3. planner responds
-4. no domain mutation occurs
+1. user sends a text message
+2. orchestrator checks FlowState — idle, continue
+3. LLM returns `{"message": "...", "action": null}`
+4. orchestrator sends message; no dispatch
 
-### Deterministic payment turn
+### Direct payment turn
 
 1. user asks to send money
-2. interpreter resolves executable payment frame
-3. execution boundary keeps it deterministic
-4. payment engine opens review
+2. orchestrator calls LLM — returns `{"action":"create_payment","amount":5,"beneficiary":"aws"}`
+3. `ToolDispatcher` calls `paymentEngine.preparePayment()`
+4. payment card with Confirm / Cancel buttons shown
+5. orchestrator sets FlowState to `payment_awaiting_confirmation`
+
+### Payment confirmation
+
+1. user presses Confirm button (callback query)
+2. `handlers.ts` calls `paymentEngine.processCallback()`
+3. engine validates balance, Arc chain, submits through Circle
+4. transaction reconciled; payment log saved; FlowState cleared
 
 ### Invoice override turn
 
 1. active invoice session is `review_required`
-2. user explicitly overrides
-3. invoice follow-up handler opens payment review
-4. session becomes `awaiting_payment_confirmation`
+2. user explicitly approves (`pay it anyway`)
+3. orchestrator detects invoice FlowState, calls `invoiceEngine.prepareFromSession()`
+4. payment card shown; FlowState moves to `payment_awaiting_confirmation`

@@ -1,98 +1,106 @@
-# Interpreter-First Runtime
+# LLM-Orchestrated Runtime
 
-Arc Pay Agent now uses an interpreter-first runtime.
+> This document describes the current architecture. An earlier draft of this file referred to an "interpreter-first runtime" with `runtimeOrchestrator`, `taskInterpreter`, `AgentPlanner`, and `executionBoundary` components. None of those exist. The actual system is described below.
 
 ## Core idea
 
-The system does not treat `intentParser` as the semantic owner anymore.
+Every text turn goes through a single orchestrator (`src/core/orchestrator.ts`) that:
 
-Instead:
+1. Checks FlowState — if `payment_awaiting_confirmation`, blocks new payment commands
+2. Checks for capability queries — answers directly without LLM
+3. Calls the LLM with conversation history and system prompt
+4. Validates and dispatches the returned action
 
-1. Telegram input enters the runtime
-2. the interpreter produces a semantic frame
-3. conversation policy chooses a lane
-4. deterministic tools or planner replies execute from that frame
+## Two runtime modes
 
-## Runtime truth order
+The orchestrator supports two mutually exclusive LLM modes, selected by `USE_TOOL_CALLING` env var (default `false`):
 
-The effective truth order is:
+### JSON mode (default)
 
-1. active state
-2. session or task follow-up context
-3. compatibility parser
-4. planner
+- System prompt contains full action reference and routing rules
+- LLM returns `{"action": "...", "message": "...", ...params}`
+- Orchestrator parses + validates JSON, then dispatches
 
-This keeps product turns deterministic while still allowing natural language.
+### Native tool calling mode
 
-## What the interpreter decides
+- System prompt is trimmed (no action reference needed)
+- LLM calls tools natively; orchestrator runs an agent loop (up to 4 iterations)
+- `TERMINAL_ACTIONS` set controls when the loop breaks immediately
 
-The interpreter is responsible for:
+## FlowState guard
 
-- whether the turn is `execute`, `clarify`, `answer`, `follow_up`, or `unsupported`
-- the goal family, such as payment, schedule, vendor, invoice, analytics, wallet, or history
-- missing slots
-- whether existing state should be cleared
-- whether planner help is needed
+The orchestrator does not use regexes for routing. It checks an explicit FlowState:
 
-## Runtime lanes
+```
+idle → normal LLM routing
+payment_awaiting_confirmation → block new payments; redirect to Confirm/Cancel buttons
+invoice_awaiting_override → invoice must be explicitly approved before payment prep
+```
 
-### Deterministic lane
+See `docs/architecture/state-model.md` for full FlowState lifecycle.
 
-Used for product-scoped turns such as:
+## Fabrication guard
 
-- wallet lookup
-- payment prep and confirmation
-- vendor operations
-- schedules
-- invoice follow-up
-- reports and history
+`isFabricatedMessage(action, message)` blocks LLM-fabricated data in data-display responses.
 
-### Planner lane
+Checks applied only to `DATA_DISPLAY_ACTIONS` (show_wallet, list_vendors, etc.):
 
-Used for:
+- `[Vendor Name]` — placeholder bracket patterns
+- `1. Item` — numbered list (LLM-generated fake list)
+- `- **Field**` — markdown list format
+- length > 120 chars — too long for a loading indicator
+- `0x[hex]{10+}` — fabricated wallet or contract address
 
-- broad help
-- explanation shaping
-- unsupported open-ended product-adjacent turns
+## TERMINAL_ACTIONS
 
-### Compatibility fallback
+A set of actions where the agent loop stops immediately after dispatch.
 
-Used only for narrow compatibility behaviors that the deterministic runtime still allows.
+These are actions where the dispatcher produces its own complete UI (payment card, data table, etc.) and no LLM synthesis step is needed or wanted.
 
-## What it does not do
+Defined in `src/ai/toolDefinitions.ts`.
 
-The interpreter does not directly:
+## What the LLM decides
 
-- submit Circle payments
-- mutate vendor storage
-- cancel schedules
-- confirm payments
+- Which tool / action to call
+- Pre-tool message to show the user while action executes
+- Conversational responses when no action is needed
 
-Those remain deterministic runtime actions.
+## What the LLM does not do
 
-## Why this matters
-
-This change reduces the need to add one regex per new wording variation. It also shrinks generic fallback behavior for short product-scoped turns.
+- Submit Circle payments (PaymentEngine controls that)
+- Mutate vendor storage directly (ToolDispatcher mediates)
+- Cancel schedules autonomously
+- Confirm payments (requires explicit user button press)
 
 ## Walkthroughs
 
-### Broad help
+### Direct payment
 
-1. user asks what the bot can do
-2. interpreter frames it as planner-style help
-3. planner answers with grounded capability guidance
-4. no execution state changes
+1. user: `send 5 usdc to aws`
+2. FlowState: idle → continue
+3. LLM returns `{"action":"create_payment","amount":5,"beneficiary":"aws","message":"Preparing 5 USDC to aws."}`
+4. message sent to user
+5. `ToolDispatcher` → `paymentEngine.preparePayment()`
+6. payment card shown
+7. FlowState set to `payment_awaiting_confirmation`
 
-### Direct payment prep
+### Follow-up during pending payment
 
-1. user asks to send money
-2. interpreter frames it as a deterministic payment turn
-3. execution boundary keeps it out of planner lane
-4. payment review opens
+1. user: `actually send 10`
+2. FlowState: `payment_awaiting_confirmation`
+3. PAYMENT_MODIFY_PATTERN matches → "There's already a payment waiting. Please cancel it first."
+4. LLM never called
 
-### Referential follow-up
+### Data display
 
-1. user says `the previous one` or `remove that vendor`
-2. session state or memory provides the recent entity
-3. deterministic follow-up handler resolves it
-4. unresolved references trigger clarification instead of guessing
+1. user: `show my wallet`
+2. LLM returns `{"action":"show_wallet","message":"Fetching your wallet…"}`
+3. message passes `isFabricatedMessage` check (short, no address, no list)
+4. `ToolDispatcher` → `walletEngine.showWallet()` sends real card
+5. `show_wallet` is in TERMINAL_ACTIONS → loop stops
+
+### Capability query
+
+1. user: `what can you do?`
+2. CAPABILITY_PATTERN matches → static capability list sent
+3. LLM never called

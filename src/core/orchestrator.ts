@@ -99,6 +99,7 @@ export class Orchestrator {
         if (/^\s*\d+\.\s+\S/m.test(message)) return true;      // 1. Item\n2. Item
         if (/[-•]\s+\*\*/.test(message)) return true;           // - **Vendor** (markdown list)
         if (message.length > 120) return true;                  // Too long for a loading indicator
+        if (/`?0x[a-fA-F0-9]{10,}`?/.test(message)) return true; // Fabricated hex address (e.g. USDC contract)
         return false;
     }
 
