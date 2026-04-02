@@ -48,6 +48,8 @@ export function attachMessageHandlers(bot: TelegramBot, deps: BotDeps): void {
                 "  schedule payment  → recurring transfers\n" +
                 "  BTC price         → live crypto prices\n" +
                 "  upload invoice    → PDF/image analysis\n\n" +
+                "Testnet USDC faucet:\n" +
+                "  https://faucet.circle.com  (select Arc network)\n\n" +
                 "AI setup (required for natural language):\n" +
                 "  /llmkey openai sk-...     → OpenAI\n" +
                 "  /llmkey anthropic sk-ant-...  → Anthropic\n" +

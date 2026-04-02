@@ -206,6 +206,14 @@ export class Orchestrator {
             await executeAction(chatId, "list_price_alerts", {});
             return true;
         }
+        if (match(["faucet", "get usdc", "get testnet", "test usdc"])) {
+            await this.sender.send(chatId,
+                "Testnet USDC Faucet\n\n" +
+                "https://faucet.circle.com\n\n" +
+                "Select \"Arc\" network, paste your wallet address, and request USDC."
+            );
+            return true;
+        }
 
         return false;
     }

@@ -36,6 +36,7 @@ Arc is an EVM-compatible L1 blockchain (Chain ID: 5042002 testnet). Key facts:
 - USDC address: 0x3600000000000000000000000000000000000000
 - EURC address: 0x89B50855Aa3bE2F677cD6303Cec089B5F319D72a
 - Router contract handles payments with memo + proofHash for on-chain indexing
+- Testnet USDC faucet: https://faucet.circle.com (select "Arc" network)
 
 ## CIRCLE KNOWLEDGE
 
