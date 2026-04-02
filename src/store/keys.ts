@@ -1,5 +1,6 @@
 import { Store } from "./base";
 import { encrypt, decrypt } from "../security/vault";
+import { logger } from "../utils/logger";
 
 interface LLMKeyData {
     provider: string;
@@ -18,7 +19,8 @@ export class LLMKeyStore {
         try {
             const key = decrypt(data.encryptedKey, this.secret);
             return { provider: data.provider, key, model: data.model };
-        } catch {
+        } catch (err: any) {
+            logger.error(chatId, "[KeyStore] Decryption failed — LLM_KEY_SECRET may have changed", { error: err?.message });
             return null;
         }
     }

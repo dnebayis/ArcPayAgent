@@ -102,8 +102,10 @@ export class Orchestrator {
                 "  \"create wallet\" — set up wallet\n" +
                 "  \"vendors\" — list vendors\n" +
                 "  \"schedules\" — list schedules\n" +
-                "  \"report\" — spending report\n\n" +
-                "For AI features: /llmkey <provider> <api_key>"
+                "  \"report\" — spending report\n" +
+                "  \"faucet\" — get USDC faucet link\n\n" +
+                "For AI features: /llmkey <provider> <api_key>\n\n" +
+                "Note: If you already set a key and see this message, the server may have restarted. Please run /llmkey again."
             );
             return;
         }
