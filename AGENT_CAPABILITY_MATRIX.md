@@ -1,192 +1,132 @@
-# Arc Pay Agent Capability Matrix
+# ArcPay Agent Capability Matrix
 
-This file describes what the agent currently does well, what is only partially supported, and what is intentionally out of scope.
-
-It is meant to be an operational reference, not a product pitch.
+Operational reference for what the agent does, what is partial, and what is out of scope.
 
 ## Status Key
 
-- `Supported`
-  Works in normal usage and is covered by tests or scenario runs.
-- `Partial`
-  Works in specific paths, but still has known limits or relies on user phrasing/context.
-- `Not Supported`
-  The agent should not claim to do this. If asked, it should answer honestly and redirect.
+- `Supported` — works in normal usage
+- `Partial` — works in specific paths, known limits
+- `Not Supported` — agent should redirect honestly, not attempt
 
 ## Core Capabilities
 
 | Area | Capability | Status | Notes |
-| --- | --- | --- | --- |
-| Wallet | Create a user wallet | `Supported` | One Circle developer-controlled wallet per Telegram user. |
-| Wallet | Show wallet address / account status | `Supported` | Deterministic. |
-| Wallet | Export wallet / private key | `Not Supported` | Circle MPC wallets never expose key material. Agent explains this and redirects to show_wallet or USDC transfer. |
-| Wallet | Live wallet intelligence | `Supported` | Requires healthy Arc RPC / explorer reachability. |
-| Payment | Prepare direct payment to saved vendor | `Supported` | Ends in explicit review + confirm. |
-| Payment | Prepare direct payment to raw `0x...` address | `Supported` | Address validation enforced. |
-| Payment | Update pending payment amount / vendor / memo | `Supported` | Deterministic update path. |
-| Payment | Cancel pending payment | `Supported` | Deterministic. |
-| Payment | Repeat last payment by reference | `Supported` | Works through follow-up confirmation flow. |
-| Payment | Balance-first payment phrasing | `Supported` | Example: `check my balance and then send 5 usd to aws`. |
-| Payment | Autonomous payment execution without confirm | `Not Supported` | Explicit review/confirm boundary remains mandatory. |
-| Schedules | Create a one-time schedule | `Supported` | Deterministic schedule creation. |
-| Schedules | Create recurring schedule | `Supported` | Current frequencies are limited to existing schedule model. |
-| Schedules | List schedules | `Supported` | Deterministic. |
-| Schedules | Cancel schedule by ID | `Supported` | Deterministic. |
-| Schedules | Cancel recent / tomorrow / referenced schedule | `Supported` | Covered by orchestrator follow-up handling. |
-| Invoices | Parse PDF invoice | `Supported` | Current primary invoice path. |
-| Invoices | Parse image invoice | `Supported` | OCR-backed; quality depends on source image. |
-| Invoices | Treat natural review captions as part of upload flow | `Supported` | Long “take a careful look at this PDF” phrasing should not trigger a second upload prompt. |
-| Invoices | Explain invoice risk | `Supported` | Reason-first explanation supported. |
-| Invoices | Prepare payment from invoice | `Supported` | Only from an active invoice session. |
-| Invoices | Review-required override (`pay it anyway`) | `Supported` | Required before payment prep when invoice risk is `REVIEW`. |
-| Invoices | Keep invoice in confirm state after override | `Supported` | Once payment review is open, invoice follow-ups should not reopen prep. |
-| Invoices | `if it looks safe, pay it` | `Supported` | Safe invoices continue to payment prep; review/high-risk invoices stop safely. |
-| Invoices | `leave it for now` | `Supported` | Clears invoice follow-up state cleanly. |
-| Invoices | Reuse stale invoice after payment | `Not Supported` | Post-payment cleanup forces a new upload. |
-| Vendors | Save vendor | `Supported` | Deterministic. |
-| Vendors | Remove vendor | `Supported` | Deterministic. |
-| Vendors | List vendors | `Supported` | Deterministic. |
-| Vendors | Vendor detail lookup | `Supported` | Uses saved vendor stats. |
-| Vendors | Remove vendor by recent reference | `Supported` | Example: `remove the payee i used last`. |
-| Vendors | Remove `that vendor` | `Supported` | Only when vendor context exists. |
-| Vendors | Standalone vendor risk profile | `Not Supported` | Agent should redirect to invoice risk or vendor lookup instead. |
-| History / Admin | Show last payee | `Supported` | Deterministic recent payment path. |
-| History / Admin | Show previous payment / previous payee | `Supported` | Referential context is supported. |
-| History / Admin | Top payee / spending summary | `Supported` | Deterministic summary path. |
-| Agent Identity | Show agent registration status | `Supported` | Read-only. |
-| Agent Identity | Show agent ID / validation status | `Supported` | Read-only. |
-| Agent Identity | Reputation / validation writes | `Partial` | Script/admin path exists; not part of user-facing payment flow. Tutorial-aligned KYC validation now uses the dedicated `agent:validation:*:kyc` commands. |
-| Agent Operations | Explain runtime model / safety boundaries | `Supported` | LLM-orchestrated via read-only operational overview. |
-| Agent Operations | Summarize current operational posture for this account | `Supported` | Includes wallet presence, saved vendors, schedules, payment-history count, invoice status, and agent identity status. |
-| Live Research | Crypto price lookup | `Supported` | CoinGecko API; BTC, ETH, SOL, and any supported symbol. |
-| Live Research | Fiat FX rate conversion | `Supported` | ECB rates via frankfurter.app; ISO 4217 pairs only (TRY/USD, EUR/GBP, etc.). |
-| Live Research | Crypto price in fiat | `Partial` | Returns USD price with note to multiply by FX rate; direct cross-pair not supported. |
-| Notifications | Incoming payment watch | `Supported` | Polls USDC/EURC balances every 30s; notifies user on balance increase. |
-| Notifications | Price threshold alerts | `Supported` | Above/below threshold per symbol; fires once when threshold is crossed. |
-| Notifications | Conditional payment on price | `Not Supported` | "Send X when BTC hits $Y" — agent redirects to setting a price alert instead. |
+|------|-----------|--------|-------|
+| Wallet | Create wallet | `Supported` | One Circle DCW per Telegram user |
+| Wallet | Show address and balance | `Supported` | USDC + EURC |
+| Wallet | Export private key | `Not Supported` | Circle MPC never exposes key material |
+| Wallet | Portfolio intelligence | `Supported` | Balance + payment stats |
+| Payment | Pay saved vendor | `Supported` | Fuzzy vendor resolution |
+| Payment | Pay raw 0x address | `Supported` | Address format validated |
+| Payment | Self-payment guard | `Supported` | Blocked at prepare() |
+| Payment | Cancel pending payment | `Supported` | [Cancel] button or text |
+| Payment | Autonomous payment (no confirm) | `Not Supported` | Review card is always required |
+| Payment | EURC payments | `Supported` | Same flow as USDC |
+| Schedules | One-time schedule | `Supported` | |
+| Schedules | Recurring schedule | `Supported` | daily/weekly/monthly/once |
+| Schedules | List / cancel schedules | `Supported` | |
+| Invoices | PDF invoice parsing | `Supported` | pdf-parse library |
+| Invoices | Image invoice parsing (OCR) | `Supported` | Tesseract.js |
+| Invoices | Risk assessment | `Supported` | SAFE / REVIEW / HIGH_RISK |
+| Invoices | Pay from invoice | `Supported` | Requires active session + vendor match |
+| Invoices | Override REVIEW risk | `Supported` | "pay it anyway" |
+| Invoices | Block HIGH_RISK | `Supported` | Cannot proceed without fix |
+| Vendors | Save / list / remove / detail | `Supported` | |
+| Vendors | Fuzzy match | `Supported` | Bigram similarity ≥ 0.5 |
+| Analytics | Spending report | `Supported` | weekly / monthly / all |
+| Analytics | Spending by vendor | `Supported` | |
+| Analytics | Recent payments | `Supported` | Last 10 |
+| Analytics | Account summary | `Supported` | Wallet + vendors + schedules |
+| Notifications | Incoming payment watch | `Supported` | Balance polling every 30s |
+| Notifications | Price threshold alerts | `Supported` | above/below, fires once |
+| Research | Crypto prices | `Supported` | CoinGecko, 100+ symbols |
+| Research | FX rates | `Supported` | Frankfurter / ECB, ISO 4217 pairs |
+| Research | Arc network stats | `Supported` | Latest block, chain ID |
+| Payment Request | Create deep link | `Supported` | `/start pay_<id>` format |
+| Payment Request | Handle payer deep link | `Supported` | Shows pay/decline card |
+| Agent Identity | Show ERC-8004 status | `Supported` | Read-only |
+| Agent Identity | Register / write | `Partial` | Requires env config |
 
-## Conversation Quality Matrix
+## LLM Configuration
 
-| Conversation Pattern | Status | Notes |
-| --- | --- | --- |
-| Greeting / small talk | `Supported` | LLM-orchestrated when BYOK is present. |
-| Broad help (`what can you do`) | `Supported` | Deterministic and intentionally short. |
-| Payment help (`I need help with payments`) | `Supported` | Deterministic. |
-| Vendor help (`I need help with a vendor`) | `Supported` | Deterministic. |
-| Short terse commands (`status`, `export wallet`, `pay it anyway`) | `Supported` | Handled by the LLM orchestrator; terse commands are resolved via conversation context. |
-| Short natural fragments (`send 1`, `cancel that`, `who last`) | `Partial` | Works when active task/reference context is still present. |
-| Task clearing on social turns | `Supported` | Social/help turns should clear stale invoice/admin tasks. |
-| Invoice follow-up continuity | `Supported` | Context survives through `does this look okay`, `why is this risky`, `pay it`, `leave it for now`. |
-| Referential admin follow-ups | `Supported` | Example: `show the payment before that`. |
-| Long open-ended advisory chat | `Partial` | Not a general-purpose assistant; conversation is still product-scoped. |
-| Operational self-knowledge (`how do you work`, `how do you manage operations`) | `Supported` | LLM-orchestrated when a key is set; bounded summary otherwise. |
-| Unsupported capability honesty | `Supported` | Agent should say when something is not supported. |
+| Feature | Status | Notes |
+|---------|--------|-------|
+| BYOK per user | `Supported` | Encrypted at rest |
+| /llmkey set | `Supported` | /llmkey \<provider\> \<key\> [model] |
+| /model change | `Supported` | /model \<name\> |
+| /provider switch | `Supported` | Keeps existing key |
+| /llminfo | `Supported` | Shows provider + model + available models |
+| No-key fallback | `Partial` | Bot prompts for key, basic commands still work |
+| OpenAI | `Supported` | |
+| Anthropic | `Supported` | |
+| Gemini | `Supported` | |
+| Groq | `Supported` | |
+| DeepSeek | `Supported` | |
+| Together / Mistral / OpenRouter / Qwen | `Supported` | |
+
+## SILENT_ACTIONS (Button Safety)
+
+These actions never have an LLM text message sent before them.
+The engine/action is always the sole sender, preventing button disappearing.
+
+`create_payment`, `list_vendors`, `show_wallet`, `report`, `spending_by_vendor`,
+`monthly_spending`, `show_recent_payments`, `list_schedules`, `top_vendors`,
+`list_price_alerts`, `account_summary`, `vendor_detail`, `wallet_intelligence`,
+`agent_status`, `agent_identity`, `agent_validation_status`, `watch_payments_status`,
+`status`, `create_wallet`, `export_wallet`, `schedule_payment`, `cancel_schedule`,
+`cancel_all_schedules`, `set_price_alert`, `remove_price_alert`, `remove_all_price_alerts`,
+`watch_payments_enable`, `watch_payments_disable`, `get_crypto_prices`, `get_fx_rate`,
+`get_arc_network_stats`, `get_my_arc_activity`, `create_payment_request`,
+`remove_vendor`, `remove_all_vendors`, `save_vendor`
 
 ## Known Limits
 
-### Product Limits
+- Invoice OCR quality depends on image resolution
+- Wallet intelligence depends on Arc RPC availability
+- Schedule execution requires explicit user confirmation (not autonomous)
+- Payment history is local-only (no full chain indexer)
+- Multi-instance deployments require PostgreSQL (SQLite is single-instance only)
+- Analytics amounts use `number`, not fixed-precision decimal
 
-- The product is still centered on a small set of jobs:
-  - pay someone
-  - review/pay an invoice
-  - manage vendors and inspect recent payment history
-- It is not intended to be a general chat assistant.
-- It does not support standalone vendor risk scoring.
-- It does not support autonomous spending or autopay without explicit review.
-- ERC-8004 reputation/validation exists as an admin/script surface, not as an end-user workflow.
-- The recommended validation semantic is now `kyc_verified`; older `service_verified` responses may still exist as legacy attestations.
-- Draft-style flows are intentionally removed from the current supported surface.
+## Regression Checklist
 
-### Conversation Limits
+### Wallet
+- `create wallet`
+- `show wallet` / `wallet balance`
 
-- Very broad or vague questions still work best when they are tied to a product outcome.
-- Some follow-ups depend on fresh context; after a clear boundary reset, the agent may ask the user to restate the target.
-- Very short phrases still rely on fresh active context. Outside that context, the agent should clarify instead of guessing.
-- Displayed vendor names are only as good as the saved vendor record. The agent intentionally does not try to beautify brand casing automatically.
+### Payment (core flow)
+- `send 5 usdc to jack` → card appears with [Confirm] [Cancel]
+- `[Confirm]` → processing message → success message
+- `[Cancel]` → "Payment cancelled"
+- `send usdc to jack` → "How much?" → `5` → card
 
-### Data / State Limits
+### Vendor
+- `save vendor jack 0x...`
+- `list vendors`
+- `remove vendor jack`
 
-- Recent payee/history answers depend on recorded local payment history.
-- Invoice reasoning quality depends on the extracted invoice fields and OCR quality.
-- Natural invoice captions are supported, but OCR mistakes can still distort the active invoice session.
-- Live wallet intelligence depends on Arc RPC and external data availability.
-- Vendor references are only as reliable as the current conversation context and saved vendor store.
+### Invoice
+- Upload PDF → analysis card
+- `is this safe?` → risk explanation
+- `pay this invoice` → payment card (if vendor matched)
+- `pay it anyway` → override REVIEW
 
-## Behavioral Guardrails
+### Schedule
+- `schedule 5 usdc to jack tomorrow at 9am`
+- `list schedules`
+- `cancel schedule <id>`
 
-- Payments always stop at explicit user confirmation before submission.
-- Unsafe or review-required invoices do not automatically proceed to payment prep.
-- Review-required invoices must receive an explicit override before payment prep opens.
-- Once invoice payment review is open, later invoice text should point back to `yes` or `cancel`, not reopen review.
-- Unsupported capabilities should produce a short, honest redirect instead of a speculative answer.
-- Social/help turns should not silently revive stale invoice/payment/admin tasks.
-- Completed invoice payments should close the active invoice session immediately.
-
-## Recommended Regression Checklist
-
-Use this set after any agent-side refactor:
-
-### Broad Help
-
-- `what can you do`
-- `I need help with payments`
-- `I need help with a vendor`
-
-### Payment / Schedule
-
-- `send aws 1 usd`
-- `schedule 1 usd to aws tomorrow`
-- `check my balance and then send 2 usd to aws`
-
-### Invoice Follow-up
-
-- upload invoice
-- `does this look okay`
-- `why is this risky`
-- `if it looks safe, pay it`
-- `pay it anyway`
-- `I've reviewed it. Go ahead despite that.`
-- `leave it for now`
-- confirm payment
-- `pay this invoice` again and verify that a new upload is required
-
-### Admin / History
-
-- `show me who i paid last`
-- `show the payment before that`
-- `remove the payee i used last`
-- `remove that vendor`
-
-### Agent Identity
-
-- `show agent status`
-- `what is our agent id?`
-- `show agent validation status`
-
-### Notifications & Alerts
-
-- `watch my wallet for incoming payments`
-- `stop watching my wallet`
-- `are my payment notifications on?`
+### Alerts / Watch
+- `watch my wallet`
 - `alert me when BTC hits $100000`
-- `notify me when ETH drops below $2000`
 - `show my price alerts`
-- `remove all price alerts`
 
-### FX & Prices
+### LLM Config
+- `/llmkey openai sk-...`
+- `/model gpt-4.1`
+- `/provider anthropic`
+- `/llminfo`
 
-- `how much is bitcoin?`
-- `how much is 1000 TRY in USD?`
-- `what's the EUR/GBP rate?`
-
-## Current Recommendation
-
-Do not expand capability surface aggressively until transcript-driven smoke tests remain stable across:
-
-- broad help
-- invoice follow-up
-- admin/history references
-- payment/schedule direct commands
-
-The current priority should be behavior stability, not feature count.
-
+### Research
+- `BTC price`
+- `1000 EUR in USD`

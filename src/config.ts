@@ -1,83 +1,76 @@
-import { ethers } from "ethers";
 import { z } from "zod";
-import { ARC_TESTNET_RPC_URL } from "./blockchain/arcConfig";
+import "dotenv/config";
 
-const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
-const DEFAULT_CIRCLE_API_URL = "https://api.circle.com/v1/w3s";
+const hex64 = z.string().regex(/^[a-fA-F0-9]{64}$/, "Must be 64-char hex");
+const ethAddr = z.string().regex(/^0x[a-fA-F0-9]{40}$/, "Must be valid Ethereum address");
 
-const requiredString = (name: string) => z.string().trim().min(1, `${name} is required`);
-const optionalString = () =>
-    z.string().trim().transform((value) => (value.length > 0 ? value : undefined)).optional();
-const evmAddress = (name: string) =>
-    requiredString(name).refine((value) => ethers.isAddress(value), `${name} must be a valid EVM address`);
+const schema = z.object({
+    // Telegram
+    TELEGRAM_TOKEN: z.string().min(1),
+    TELEGRAM_WEBHOOK_SECRET: z.string().optional(),
+    ALLOWED_CHAT_IDS: z.string().optional(),
 
-const productionSchema = z.object({
-    TELEGRAM_TOKEN: optionalString(),
-    BOT_USERNAME: z.string().trim().min(1).optional().default("ArcPayAgentBot"),
-    ARC_RPC_URL: z.string().trim().url("ARC_RPC_URL must be a valid URL").default(ARC_TESTNET_RPC_URL),
-    PAYABLES_ROUTER_ADDRESS: evmAddress("PAYABLES_ROUTER_ADDRESS"),
-    USDC_ADDRESS: evmAddress("USDC_ADDRESS"),
-    EURC_ADDRESS: evmAddress("EURC_ADDRESS"),
-    LLM_KEY_SECRET: requiredString("LLM_KEY_SECRET"),
-    CIRCLE_API_KEY: requiredString("CIRCLE_API_KEY"),
-    CIRCLE_ENTITY_SECRET: requiredString("CIRCLE_ENTITY_SECRET").regex(/^[0-9a-fA-F]{64}$/, "CIRCLE_ENTITY_SECRET must be a 32-byte hex string"),
-    CIRCLE_WALLET_SET_ID: requiredString("CIRCLE_WALLET_SET_ID"),
-    CIRCLE_API_URL: z.string().trim().url("CIRCLE_API_URL must be a valid URL").default(DEFAULT_CIRCLE_API_URL),
-    ARC_AGENT_METADATA_URI: optionalString(),
-    ARC_AGENT_OWNER_WALLET_ID: optionalString(),
-    ARC_AGENT_VALIDATOR_WALLET_ID: optionalString(),
-    ARC_AGENT_ID: optionalString(),
-    ARC_AGENT_WALLET_SET_NAME: optionalString(),
-    ERC8004_IDENTITY_REGISTRY_ADDRESS: optionalString(),
-    ERC8004_REPUTATION_REGISTRY_ADDRESS: optionalString(),
-    ERC8004_VALIDATION_REGISTRY_ADDRESS: optionalString(),
-    /** Comma-separated Telegram chat IDs that may use the bot. Empty = open to all. */
-    ALLOWED_CHAT_IDS: z.string().trim().optional().default(""),
-    USE_TOOL_CALLING: z.string().optional().default("").transform(v => v === "true"),
-    WEBHOOK_URL: z.string().trim().optional().default(""),
-    WEBHOOK_SECRET: z.string().trim().optional().default(""),
+    // Circle
+    CIRCLE_API_KEY: z.string().min(1),
+    CIRCLE_ENTITY_SECRET: hex64,
+    CIRCLE_WALLET_SET_ID: z.string().uuid(),
+    CIRCLE_API_URL: z.string().url().default("https://api.circle.com/v1/w3s"),
+
+    // Arc Network
+    ARC_RPC_URL: z.string().url().default("https://rpc.testnet.arc.network"),
+    ARC_CHAIN_ID: z.coerce.number().default(5042002),
+    ARC_GAS_RESERVE_USDC: z.string().default("0.10"),
+
+    // Contracts
+    PAYABLES_ROUTER_ADDRESS: ethAddr,
+    USDC_ADDRESS: ethAddr.default("0x3600000000000000000000000000000000000000"),
+    EURC_ADDRESS: ethAddr.default("0x89B50855Aa3bE2F677cD6303Cec089B5F319D72a"),
+
+    // ERC-8004 Registries
+    ERC8004_IDENTITY_REGISTRY: ethAddr.default("0x8004A818BFB912233c491871b3d84c89A494BD9e"),
+    ERC8004_REPUTATION_REGISTRY: ethAddr.default("0x8004B663056A597Dffe9eCcC1965A193B7388713"),
+    ERC8004_VALIDATION_REGISTRY: ethAddr.default("0x8004Cb1BF31DAf7788923b405b754f57acEB4272"),
+
+    // Agent Identity (optional)
+    ARC_AGENT_METADATA_URI: z.string().optional(),
+    ARC_AGENT_OWNER_WALLET_ID: z.string().optional(),
+    ARC_AGENT_VALIDATOR_WALLET_ID: z.string().optional(),
+    ARC_AGENT_ID: z.string().optional(),
+    ARC_AGENT_WALLET_SET_NAME: z.string().optional(),
+
+    // Security
+    LLM_KEY_SECRET: z.string().min(1),
+
+    // Database (optional — defaults to SQLite)
+    DATABASE_URL: z.string().optional(),
+
+    // FX API
+    FX_API_BASE_URL: z.string().url().default("https://api.frankfurter.dev/v1"),
+
+    // Polling intervals (ms)
+    SCHEDULER_INTERVAL_MS: z.coerce.number().default(10_000),
+    WATCHER_INTERVAL_MS: z.coerce.number().default(30_000),
+    ALERTER_INTERVAL_MS: z.coerce.number().default(60_000),
+
+    // LLM
+    MAX_AGENT_ITERATIONS: z.coerce.number().default(4),
+
+    // Mode
+    WEBHOOK_URL: z.string().url().optional(),
+    PORT: z.coerce.number().default(3000),
 });
 
-const testSchema = z.object({
-    TELEGRAM_TOKEN: optionalString(),
-    BOT_USERNAME: z.string().trim().optional().default("ArcPayAgentBot"),
-    ARC_RPC_URL: z.string().trim().optional().default(ARC_TESTNET_RPC_URL),
-    PAYABLES_ROUTER_ADDRESS: z.string().trim().optional().default(ZERO_ADDRESS),
-    USDC_ADDRESS: z.string().trim().optional().default(ZERO_ADDRESS),
-    EURC_ADDRESS: z.string().trim().optional().default("0x89B50855Aa3bE2F677cD6303Cec089B5F319D72a"),
-    LLM_KEY_SECRET: z.string().trim().optional().default("test-llm-secret"),
-    CIRCLE_API_KEY: z.string().trim().optional().default("test-circle-key"),
-    CIRCLE_ENTITY_SECRET: z.string().trim().optional().default("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"),
-    CIRCLE_WALLET_SET_ID: z.string().trim().optional().default("test-wallet-set"),
-    CIRCLE_API_URL: z.string().trim().optional().default(DEFAULT_CIRCLE_API_URL),
-    ARC_AGENT_METADATA_URI: optionalString(),
-    ARC_AGENT_OWNER_WALLET_ID: optionalString(),
-    ARC_AGENT_VALIDATOR_WALLET_ID: optionalString(),
-    ARC_AGENT_ID: optionalString(),
-    ARC_AGENT_WALLET_SET_NAME: optionalString(),
-    ERC8004_IDENTITY_REGISTRY_ADDRESS: optionalString(),
-    ERC8004_REPUTATION_REGISTRY_ADDRESS: optionalString(),
-    ERC8004_VALIDATION_REGISTRY_ADDRESS: optionalString(),
-    ALLOWED_CHAT_IDS: z.string().trim().optional().default(""),
-    USE_TOOL_CALLING: z.string().optional().default("").transform(v => v === "true"),
-    WEBHOOK_URL: z.string().trim().optional().default(""),
-    WEBHOOK_SECRET: z.string().trim().optional().default(""),
-});
+export type Config = z.infer<typeof schema>;
 
-export type RuntimeConfig = z.infer<typeof productionSchema>;
+let _config: Config | null = null;
 
-function formatError(error: z.ZodError): string {
-    return error.issues.map((issue) => issue.message).join("; ");
+export function loadConfig(): Config {
+    if (_config) return _config;
+    _config = schema.parse(process.env);
+    return _config;
 }
 
-export function loadRuntimeConfig(env: NodeJS.ProcessEnv = process.env, options?: { isTest?: boolean }): RuntimeConfig {
-    const isTest = options?.isTest ?? env.NODE_ENV === "test";
-    const schema = isTest ? testSchema : productionSchema;
-    const parsed = schema.safeParse(env);
-
-    if (!parsed.success) {
-        throw new Error(`Invalid runtime configuration: ${formatError(parsed.error)}`);
-    }
-
-    return parsed.data as RuntimeConfig;
+export function getConfig(): Config {
+    if (!_config) throw new Error("Config not loaded. Call loadConfig() first.");
+    return _config;
 }

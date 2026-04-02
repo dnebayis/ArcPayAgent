@@ -1,21 +1,12 @@
-/**
- * Structured JSON logger with trace ID support.
- * Each log line is a JSON object so it can be parsed by log aggregators.
- *
- * Usage:
- *   import { logger } from "./logger";
- *   logger.info("t1a2b3", "Payment prepared", { chatId, amount });
- */
+type LogLevel = "info" | "warn" | "error" | "debug";
 
-type LogLevel = "info" | "warn" | "error";
-
-function emit(level: LogLevel, traceId: string | null, msg: string, meta?: Record<string, unknown>): void {
-    const entry: Record<string, unknown> = {
+function log(level: LogLevel, traceId: string | number | null, message: string, data?: Record<string, unknown>): void {
+    const entry = {
         ts: new Date().toISOString(),
         level,
-        msg,
         ...(traceId ? { traceId } : {}),
-        ...meta,
+        msg: message,
+        ...data,
     };
     const line = JSON.stringify(entry);
     if (level === "error") {
@@ -28,13 +19,8 @@ function emit(level: LogLevel, traceId: string | null, msg: string, meta?: Recor
 }
 
 export const logger = {
-    info(traceId: string | null, msg: string, meta?: Record<string, unknown>): void {
-        emit("info", traceId, msg, meta);
-    },
-    warn(traceId: string | null, msg: string, meta?: Record<string, unknown>): void {
-        emit("warn", traceId, msg, meta);
-    },
-    error(traceId: string | null, msg: string, meta?: Record<string, unknown>): void {
-        emit("error", traceId, msg, meta);
-    },
+    info: (traceId: string | number | null, msg: string, data?: Record<string, unknown>) => log("info", traceId, msg, data),
+    warn: (traceId: string | number | null, msg: string, data?: Record<string, unknown>) => log("warn", traceId, msg, data),
+    error: (traceId: string | number | null, msg: string, data?: Record<string, unknown>) => log("error", traceId, msg, data),
+    debug: (traceId: string | number | null, msg: string, data?: Record<string, unknown>) => log("debug", traceId, msg, data),
 };

@@ -1,55 +1,33 @@
-# Live Long-Term Testing
+# Long-Term Testing
 
-This repo now has a long-term live corpus for conversational styles that tend to break product agents.
+## After 24h+ Uptime
 
-## Suite families
+### Memory
+- [ ] Conversation memory does not grow unbounded
+- [ ] FlowState resets after payment completion
+- [ ] Multiple users do not interfere with each other
 
-- `scenarios/live-longterm-limited-english.json`
-  Covers limited-English phrasing, broken grammar, and reduced-function-word prompts.
-- `scenarios/live-longterm-terse-elliptical.json`
-  Covers one-word or ultra-short prompts, elliptical references, and minimal follow-ups.
-- `scenarios/live-longterm-verbose-indirect.json`
-  Covers long, indirect, story-shaped, or hedged requests.
-- `scenarios/live-longterm-context-switching.json`
-  Covers switching between vendor, wallet, payment, and history lanes without losing context.
+### Services
+- [ ] Scheduler fires within ~10s of due time
+- [ ] Watcher detects incoming payments within ~30s
+- [ ] Alerter fires within ~60s of threshold crossing
+- [ ] All three recover from RPC errors without crashing
 
-## How to run
+### Persistence
+- [ ] Pending payments survive restart
+- [ ] Submitted TXs reconciled on startup
+- [ ] Payment logs accumulate correctly
+- [ ] LLM keys survive restart
 
-Run the whole pack:
+### Error Recovery
+- [ ] RPC timeout → watcher logs warning, continues
+- [ ] Circle API error → error sent to user, state cleaned up
+- [ ] LLM API error → "Something went wrong", no dirty state
+- [ ] Invalid PDF → helpful error message, no crash
 
-```bash
-npm run telegram:live:longterm
-```
+## Known Limitations
 
-Or through the cataloged development group:
-
-```bash
-npm run telegram:live:batch --group development-longterm
-```
-
-Run one suite:
-
-```bash
-npm run telegram:live:batch -- scenarios/live-longterm-limited-english.json
-```
-
-## Failure harvesting
-
-After a run, harvest failures and warnings from recent live reports:
-
-```bash
-npm run telegram:live:harvest -- --pattern live-longterm-
-```
-
-That writes a Markdown summary under `.telegram-live/harvest/`.
-
-## Promotion workflow
-
-When a live step fails:
-
-1. Keep the live step if it represents a real user style worth probing repeatedly.
-2. If the miss is parser/runtime-shaped, add a deterministic regression to `tests/unit/confusingPhraseCorpus.test.ts`.
-3. If the miss is stateful, add or update a runtime scenario under `scenarios/runtime-v2-*.json`.
-4. Re-run the focused live suite after the fix.
-
-The point is to grow the corpus from real failures instead of repeatedly rediscovering the same brittle phrasing classes.
+- SQLite: single-instance only. Use PostgreSQL for multi-instance.
+- OCR quality depends on image resolution.
+- CoinGecko rate limits may affect heavy price alert load.
+- Arc Testnet RPC may have higher latency than mainnet.

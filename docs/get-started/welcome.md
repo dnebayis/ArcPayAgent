@@ -1,46 +1,33 @@
-# Welcome to Arc Pay Agent
+# Welcome to ArcPay Agent
 
-Arc Pay Agent is a Telegram-based USDC payment copilot for Arc Testnet.
+ArcPay Agent is a Telegram-based USDC/EURC payment assistant for Arc Testnet.
 
-It combines:
+## What It Does
 
-- Circle developer-controlled wallets
-- Arc-native USDC payments
-- interpreter-first conversational routing
-- deterministic payment, schedule, vendor, and invoice execution
-- invoice analysis from PDF and image uploads
-- live Telegram regression tooling
-- ERC-8004 agent identity with tutorial-aligned KYC validation helpers
-
-## What It Is
-
-Arc Pay Agent is not a general-purpose chatbot.
-
-It is a product-scoped operator for:
-
-- wallet lookup and account status
-- vendor management
-- payment preparation and confirmation
-- recurring and one-time schedules
-- invoice review and invoice-linked payment preparation
-- payment history and spending analytics
+- One Circle Developer-Controlled Wallet per user
+- Send USDC/EURC to saved vendors or raw `0x` addresses
+- Schedule recurring payments
+- Analyze PDF/image invoices and pay them
+- Watch for incoming payments
+- Set crypto price alerts
+- Live crypto price and FX lookups
 
 ## What Makes It Different
 
-### Interpreter-first runtime
+### SILENT_ACTIONS — Button Safety
 
-Natural language is interpreted into a semantic frame first. Execution still stays deterministic.
+For actions that produce their own output (payment cards, lists, balances), the LLM message is **never** sent. Only the engine sends. This makes the classic "buttons disappeared" bug structurally impossible.
 
-### Deterministic payment boundary
+### Single LLM Path
 
-The LLM does not directly send money. It interprets the user turn; runtime and tool layers decide whether a payment can be prepared or confirmed.
+Tool-calling mode only. No JSON fallback, no dual execution paths.
 
-### Invoice sessions
+### FlowState Machine
 
-Invoices are no longer handled as loose memory fragments. Uploads create an active invoice session with explicit review, override, and post-pay cleanup rules.
+Single source of truth for conversation state. `awaiting_confirmation` is set exactly once — when the payment card appears — and cleared exactly once — when Confirm or Cancel is pressed.
 
 ## Start Here
 
 1. [Quickstart](./quickstart.md)
-2. [Interpreter-First Runtime](../concepts/interpreter-first-runtime.md)
+2. [Payment Lifecycle](../concepts/payment-lifecycle.md)
 3. [System Overview](../architecture/system-overview.md)

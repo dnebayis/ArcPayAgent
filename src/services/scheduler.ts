@@ -1,73 +1,72 @@
-import TelegramBot from "node-telegram-bot-api";
-import { ScheduleStore } from "../storage/schedules";
-import { PaymentEngine } from "../engines/paymentEngine";
-import { UserPreferencesStore } from "../storage/userPreferences";
-import { formatUserDateTime } from "../utils/userDateTime";
-import { escapeTelegramMarkdown } from "../utils/telegramMarkdown";
+import { logger } from "../utils/logger";
+import type { ScheduleStore } from "../store/schedules";
+import type { PaymentEngine } from "../engines/payment";
+import type { Sender } from "../core/sender";
 
 export class SchedulerService {
     private timer: ReturnType<typeof setInterval> | null = null;
 
     constructor(
-        private bot: TelegramBot,
-        private scheduleStore: ScheduleStore,
+        private schedules: ScheduleStore,
         private paymentEngine: PaymentEngine,
-        private userPreferencesStore: UserPreferencesStore
-    ) { }
+        private sender: Sender,
+        private intervalMs: number = 10_000,
+    ) {}
 
-    /**
-     * Start the scheduler — checks every 10 seconds for due payments
-     */
     start(): void {
-        console.log("[Scheduler] Started — checking every 10s");
-        this.timer = setInterval(() => this.tick(), 10 * 1000);
-        // Run immediately on start
-        this.tick();
+        if (this.timer) return;
+        logger.info(null, "[Scheduler] Started", { intervalMs: this.intervalMs });
+
+        this.timer = setInterval(() => this.tick().catch(err =>
+            logger.error(null, "[Scheduler] Tick error", { error: err.message })
+        ), this.intervalMs);
+
+        // Run immediately too
+        this.tick().catch(err => logger.error(null, "[Scheduler] Initial tick error", { error: err.message }));
     }
 
     stop(): void {
         if (this.timer) {
             clearInterval(this.timer);
             this.timer = null;
-            console.log("[Scheduler] Stopped");
+            logger.info(null, "[Scheduler] Stopped");
         }
     }
 
-    /**
-     * Check for due schedules and notify users
-     */
-    private tick(): void {
-        const due = this.scheduleStore.getDueSchedules();
-
-        if (due.length > 0) {
-            console.log(`[Scheduler] Found ${due.length} due schedule(s)`);
-        }
+    private async tick(): Promise<void> {
+        const due = await this.schedules.getDueSchedules();
+        if (due.length === 0) return;
 
         for (const { chatId, schedule } of due) {
-            const schedToken = schedule.token ?? "USDC";
-            console.log(`[Scheduler] Due: ${schedule.amount} ${schedToken} → ${schedule.vendor} for chatId=${chatId}`);
+            try {
+                await this.schedules.markNotified(chatId, schedule.id);
 
-            const freqLabel = schedule.frequency === "once" ? "" : ` (${schedule.frequency})`;
-            const preferences = this.userPreferencesStore.getPreferences(chatId);
-            const scheduledFor = formatUserDateTime(schedule.nextExecution, preferences);
+                // Auto-execute the payment
+                await this.paymentEngine.prepare(
+                    chatId,
+                    schedule.address,
+                    schedule.amount,
+                    schedule.token,
+                    `Scheduled: ${schedule.vendor}`,
+                    { type: "schedule", scheduleId: schedule.id },
+                );
 
-            this.bot.sendMessage(
-                chatId,
-                `⏰ **Scheduled payment due**${freqLabel}\n\nAmount: ${schedule.amount} ${schedToken}\nRecipient: **${escapeTelegramMarkdown(schedule.vendor)}**\nScheduled for: ${scheduledFor}\n\nChoose an action below.`,
-                {
-                    parse_mode: "Markdown",
-                    reply_markup: {
-                        inline_keyboard: [
-                            [
-                                { text: "✅ Send now", callback_data: `sched_pay_${chatId}_${schedule.id}` },
-                                { text: "❌ Cancel", callback_data: `sched_cancel_${chatId}_${schedule.id}` }
-                            ]
-                        ]
-                    }
-                }
-            );
+                // Mark executed (advances next execution or deactivates)
+                await this.schedules.markExecuted(chatId, schedule.id);
 
-            this.scheduleStore.markNotified(chatId, schedule.id);
+                logger.info(chatId, "[Scheduler] Executed schedule", {
+                    scheduleId: schedule.id,
+                    vendor: schedule.vendor,
+                    amount: schedule.amount,
+                });
+            } catch (err: any) {
+                logger.error(chatId, "[Scheduler] Failed to execute schedule", {
+                    scheduleId: schedule.id,
+                    error: err.message,
+                });
+                // Reset awaiting so it can retry next tick
+                await this.schedules.markNotified(chatId, schedule.id).catch(() => {});
+            }
         }
     }
 }

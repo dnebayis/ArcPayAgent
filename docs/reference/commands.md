@@ -1,66 +1,64 @@
 # Commands
 
+## Slash Commands
+
+| Command | Purpose |
+|---------|---------|
+| `/start` | Welcome message |
+| `/help` | Command list |
+| `/llmkey <provider> <key> [model]` | Set LLM API key |
+| `/model <name>` | Change model |
+| `/provider <name>` | Switch provider (keeps key) |
+| `/llminfo` | Show LLM config |
+| `/llmremove` | Remove LLM key |
+| `/reset` | Clear conversation |
+
 ## Wallet
 
-- `show wallet`
-- `wallet balance`
-- `status`
-- `export wallet`
+- `create wallet` / `show wallet` / `wallet balance` / `export wallet`
 
 ## Payments
 
-- `send 5 usdc to aws`
+- `send 5 usdc to jack`
 - `send 5 usdc to 0x...`
-- `cancel payment`
-- `yes`
-- `add memo lunch`
+- `send $20 to jack` (→ 20 USDC)
+- `pay jack 10 eurc`
+- `request 20 usdc`
 
 ## Vendors
 
-- `save vendor aws 0x...`
-- `list vendors`
-- `vendor aws`
-- `remove vendor aws`
+- `save vendor jack 0x...`
+- `list vendors` / `vendor jack` / `remove vendor jack` / `remove all vendors`
 
 ## Invoices
 
-- upload PDF or photo
-- `is this safe?`
-- `why is this risky?`
-- `pay this invoice`
-- `pay it anyway`
-- `yes`
+- Upload PDF or image
+- `is this safe?` / `pay this invoice` / `pay it anyway`
 
 ## Schedules
 
-- `schedule payment 10 usdc to aws tomorrow`
-- `list schedules`
-- `cancel schedule <id>`
+- `schedule payment 10 usdc to jack weekly`
+- `schedule 5 usdc to aws tomorrow at 9am`
+- `list schedules` / `cancel schedule <id>` / `cancel all schedules`
 
-## Reports and history
+## Reports
 
-- `report`
-- `account summary`
-- `who did I pay last`
-- `payment before that`
+- `report` / `weekly report` / `monthly report`
+- `account summary` / `recent payments` / `monthly spending` / `spending by vendor`
 
-## Agent identity
+## Notifications
 
-- `show agent status`
-- `what is our agent id?`
-- `show agent validation status`
+- `watch my wallet` / `stop watching my wallet`
+- `alert me when BTC hits $100000`
+- `notify me when ETH drops below $2000`
+- `show my price alerts` / `remove alert <id>` / `remove all price alerts`
 
-## Admin scripts
+## Research
 
-- `npm run agent:status`
-- `npm run agent:reconcile`
-- `npm run agent:validation:request:kyc`
-- `npm run agent:validation:respond:kyc`
-- `npm run agent:validation:status`
+- `BTC price` / `ETH price`
+- `how much is 1000 EUR in USD?`
+- `Arc network stats`
 
-## Natural language examples
+## Agent Identity
 
-- `check my balance and then send 5 dollars to aws`
-- `pay Anthropic tomorrow morning`
-- `show me the vendor I paid most recently`
-- `check the invoice first, then pay it if it looks safe`
+- `show agent status` / `show agent validation status`

@@ -2,255 +2,153 @@
 
 ## Overview
 
-ArcPay Agent is a long-running Node.js service with:
+ArcPay Agent is a single long-running Node.js service:
 
-- Telegram polling
-- a lightweight HTTP health server
-- local or PostgreSQL-backed persistence
-- periodic scheduler and reconciliation timers
-- LLM-orchestrated conversation runtime
+- Telegram polling or webhook
+- HTTP health server (`/health`)
+- SQLite or PostgreSQL persistence
+- Background scheduler, watcher, and alerter
 
-The safest deployment model is a single instance.
-
-## Runtime Requirements
+## Requirements
 
 - Node.js 20+
 - Telegram bot token
-- Circle developer-controlled wallet credentials
-- Arc Testnet RPC
-- Arc router address
-- Arc USDC address
-
-## Environment Variables
-
-### Required by current runtime validation
-
-```env
-PAYABLES_ROUTER_ADDRESS=
-USDC_ADDRESS=
-LLM_KEY_SECRET=
-CIRCLE_API_KEY=
-CIRCLE_ENTITY_SECRET=
-CIRCLE_WALLET_SET_ID=
-```
-
-### Common runtime variables
-
-```env
-TELEGRAM_TOKEN=
-BOT_USERNAME=ArcPayAgentBot
-ARC_RPC_URL=https://rpc.testnet.arc.network
-CIRCLE_API_URL=https://api.circle.com/v1/w3s
-PORT=3000
-TZ=Europe/Istanbul
-ARC_GAS_RESERVE_USDC=0.10
-```
-
-### Optional operational variables
-
-```env
-DATABASE_URL=
-ARC_CHAIN_ID=5042002
-PAYMENT_HISTORY_SOURCE=local
-PAYMENT_HISTORY_CHUNK=8000
-PAYMENT_HISTORY_WINDOWS=2
-CIRCLE_TX_POLL_ATTEMPTS=15
-CIRCLE_TX_POLL_INTERVAL_MS=2000
-ARC_AGENT_METADATA_URI=
-ARC_AGENT_ID=
-ARC_AGENT_OWNER_WALLET_ID=
-ARC_AGENT_VALIDATOR_WALLET_ID=
-ARC_AGENT_WALLET_SET_NAME=
-ERC8004_IDENTITY_REGISTRY_ADDRESS=
-ERC8004_REPUTATION_REGISTRY_ADDRESS=
-ERC8004_VALIDATION_REGISTRY_ADDRESS=
-```
+- Circle Developer-Controlled Wallet credentials
+- Arc Testnet RPC access
+- Arc Router contract address
 
 ## Build and Start
 
-Install:
-
 ```bash
-npm ci
-```
-
-Build:
-
-```bash
+npm install
 npm run build
-```
-
-Run:
-
-```bash
 npm start
 ```
 
-Development:
-
+Development (ts-node with watch):
 ```bash
 npm run dev
 ```
 
-## Health Endpoints
+## Environment Variables
 
-The service exposes:
+### Required
 
-- `GET /health`
-- `GET /ready`
-- `GET /`
+```env
+TELEGRAM_TOKEN=
+CIRCLE_API_KEY=
+CIRCLE_ENTITY_SECRET=           # 64-char hex
+CIRCLE_WALLET_SET_ID=           # UUID
+PAYABLES_ROUTER_ADDRESS=        # 0x...
+LLM_KEY_SECRET=                 # any strong random string for key encryption
+```
 
-Recommended health check:
+### Common Optional
 
-- liveness: `/health`
-- readiness: `/ready`
+```env
+ARC_RPC_URL=https://rpc.testnet.arc.network
+ARC_CHAIN_ID=5042002
+USDC_ADDRESS=0x3600000000000000000000000000000000000000
+EURC_ADDRESS=0x89B50855Aa3bE2F677cD6303Cec089B5F319D72a
+ARC_GAS_RESERVE_USDC=0.10
+CIRCLE_API_URL=https://api.circle.com/v1/w3s
+PORT=3000
+DATABASE_URL=                   # PostgreSQL (leave blank for SQLite)
+ALLOWED_CHAT_IDS=               # comma-separated Telegram chat IDs, blank = allow all
+WEBHOOK_URL=                    # set to enable webhook instead of polling
+MAX_AGENT_ITERATIONS=4
+SCHEDULER_INTERVAL_MS=10000
+WATCHER_INTERVAL_MS=30000
+ALERTER_INTERVAL_MS=60000
+```
 
-Important note:
+### ERC-8004 Agent Identity (optional)
 
-- current readiness becomes `true` when persistence and bot readiness are true
-- RPC and scheduler state are included in the readiness payload but do not block the top-level `ready` flag
+```env
+ARC_AGENT_METADATA_URI=
+ARC_AGENT_OWNER_WALLET_ID=
+ARC_AGENT_VALIDATOR_WALLET_ID=
+ARC_AGENT_ID=
+ERC8004_IDENTITY_REGISTRY=0x8004A818BFB912233c491871b3d84c89A494BD9e
+ERC8004_REPUTATION_REGISTRY=0x8004B663056A597Dffe9eCcC1965A193B7388713
+ERC8004_VALIDATION_REGISTRY=0x8004Cb1BF31DAf7788923b405b754f57acEB4272
+```
 
-## Persistence Choices
+## Persistence
 
-### SQLite default
+### SQLite (default)
 
-Default local path:
-
-- `data/arcpay.sqlite`
-
-Use this if:
-
-- you run a single instance
-- you have persistent disk
-- you want the simplest deployment
+Stored at `data/arcpay.sqlite`. Mount a persistent volume at `data/` in containers.
 
 ### PostgreSQL
 
-Enable with:
+Set `DATABASE_URL=postgres://...` — the `kv` table is created automatically on first boot.
+SSL is auto-enabled for non-localhost connections (required by Northflank, Railway, Render, etc.).
 
-```env
-DATABASE_URL=postgres://...
+## Health Check
+
+```
+GET /health → 200 {"status":"ok","uptime":N,"timestamp":"..."}
 ```
 
-Use this if:
-
-- you want persistence across redeploys without disk coupling
-- you want cleaner operational durability
-
-The app automatically uses SSL for any non-localhost connection string (required by Northflank and most cloud providers).
-
-#### Northflank PostgreSQL Setup
-
-1. In your Northflank project, go to **Addons → Add Addon → PostgreSQL**
-2. Create the addon (any name, e.g. `arcpay-db`)
-3. Once provisioned, open the addon and copy the **Connection string** from the **Connection details** tab
-4. In your Northflank service, go to **Environment → Add Variable**:
-   - Key: `DATABASE_URL`
-   - Value: the connection string from step 3
-5. Redeploy the service — on first boot the app creates the `stores` table automatically
-6. All existing data from SQLite is **not** auto-migrated; start fresh or manually import if needed
-
-## Recommended Production Shape
-
-Best current shape:
-
-- 1 instance
-- persistent disk if using SQLite
-- fixed environment variables
-- monitored health endpoints
-
-Avoid:
-
-- multiple app instances on SQLite
-- shared write workloads without a shared database
+Use `/health` for liveness probe.
 
 ## Northflank Deployment
 
-Northflank is the recommended hosting platform.
+Recommended service settings:
 
-Suggested service settings:
-
-```text
-Build Command: npm ci && npm run build
-Start Command: npm start
+```
+Build command:   npm ci && npm run build
+Start command:   npm start
+Port:            3000
+Health path:     /health
 ```
 
-Health check settings:
+- Attach a persistent volume at `/app/data` if using SQLite
+- Use a Northflank PostgreSQL addon and set `DATABASE_URL` for durability
+- Add secrets: `TELEGRAM_TOKEN`, `CIRCLE_API_KEY`, `CIRCLE_ENTITY_SECRET`, `LLM_KEY_SECRET`
 
-```text
-Health path:    /health
-Readiness path: /ready
-Port:           3000 (or match PORT env)
-```
+## Startup Sequence
 
-Persistence notes:
+1. Load and validate config (Zod schema — fails fast on invalid env)
+2. Initialize persistence store (SQLite or PostgreSQL)
+3. Create ethers provider, Circle client, chain clients
+4. Create all stores (13 stores)
+5. Create engines (payment, invoice, analytics, requests, identity)
+6. Register all actions into the action registry
+7. Attach Telegram handlers (polling or webhook)
+8. Reconcile in-flight Circle transactions
+9. Initialize ERC-8004 agent identity (if configured)
+10. Start Scheduler (10s), Watcher (30s), Alerter (60s) services
+11. Start health HTTP server
+12. Log "ArcPay Agent ready"
 
-- if using SQLite, attach a persistent volume and set its mount path to the `data/` directory
-- if redeploy durability matters, prefer PostgreSQL with a Northflank addon or external DB
+## Graceful Shutdown
 
-Environment variables:
+`SIGINT` or `SIGTERM` → stops scheduler/watcher/alerter → stops Telegram polling → exits cleanly.
 
-- add all required env vars in the Northflank service environment settings
-- use Northflank secrets for `TELEGRAM_TOKEN`, `CIRCLE_API_KEY`, `CIRCLE_ENTITY_SECRET`, and `LLM_KEY_SECRET`
+## Arc Testnet Notes
 
-## Arc-Specific Operational Notes
-
-- this app targets Arc Testnet
-- default RPC is `https://rpc.testnet.arc.network`
-- expected chain ID is `5042002`
-- Arc uses USDC as gas
-- the app enforces a configurable extra reserve through `ARC_GAS_RESERVE_USDC`
-
-Before live testing:
-
-1. fund the Circle wallet on Arc Testnet
-2. verify USDC contract address
-3. verify router address
-4. verify the bot can create and confirm a small payment
-
-## Startup Behavior
-
-At startup the app:
-
-1. loads runtime config
-2. initializes persistence
-3. probes RPC connectivity
-4. creates Telegram bot, Circle client, stores, and engines
-5. creates orchestrator and tool dispatcher
-6. starts scheduler and reconciliation intervals
-7. optionally starts HTTP server
-
-If configuration is invalid, startup should fail for payment-critical values.
-
-## Operational Risks to Know
-
-- missing `TELEGRAM_TOKEN` does not currently fail fast; the process can boot with polling disabled
-- scheduler notifications depend on the bot being reachable and running
-- wallet intelligence uses external explorer-style data paths
-- payment history from router scans is not a full indexer
-- running more than one bot process against the same Telegram token is not supported
+- Chain ID: `5042002`
+- USDC is used as gas — wallets need USDC to cover amount + `ARC_GAS_RESERVE_USDC`
+- Arc Router contract handles `pay(to, amount, proofHash, memo)` calls
+- Explorer: https://testnet.arcscan.app
 
 ## Deployment Checklist
 
-1. Set all payment-critical env vars
-2. Confirm `CIRCLE_ENTITY_SECRET` format is valid
-3. Confirm Arc USDC and router addresses
-4. Start the service
-5. Check `/health`
-6. Check `/ready`
-7. Create a wallet in Telegram
-8. Send a small test payment
-9. Test a payment request
-10. Test a scheduled payment reminder
-11. Test an invoice upload + review + payment + post-pay cleanup sequence
+1. Set all required env vars
+2. Confirm `CIRCLE_ENTITY_SECRET` is exactly 64 hex chars
+3. Confirm `PAYABLES_ROUTER_ADDRESS` is a valid `0x` address
+4. Deploy and verify `GET /health` returns 200
+5. In Telegram: `create wallet`
+6. Fund wallet with testnet USDC (via Circle faucet or transfer)
+7. Set LLM key: `/llmkey openai sk-...`
+8. Test: `send 0.01 usdc to 0x<test_address>`
+9. Verify payment card shows `[Confirm]` and `[Cancel]` buttons
+10. Confirm payment, verify tx appears on arcscan
 
-## Rollback Advice
+## Rollback
 
-If a deploy misbehaves:
-
-- keep the same persistence backend if possible
-- avoid deleting `data/` blindly
-- if using SQLite, preserve `data/arcpay.sqlite`
-- if using PostgreSQL, keep schema/data intact and roll back only app code
-
-Because the app tracks pending and submitted transactions, preserving persistence during rollback is important.
+- SQLite: preserve `data/arcpay.sqlite` — do not delete
+- PostgreSQL: roll back app code only, leave DB data intact
+- In-flight Circle TXs are automatically reconciled on next startup

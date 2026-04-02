@@ -1,62 +1,56 @@
 # Payment Lifecycle
 
-## Prepare
+## Steps
 
-A payment starts when the user supplies enough information to build a payment review:
+### 1. Prepare
 
-- amount
-- beneficiary
-- optional memo
+```
+paymentEngine.prepare(chatId, beneficiary, amount, token, memo, source?)
+```
 
-The bot then opens `Review payment`.
+- Wallet existence check
+- Vendor resolution (fuzzy match if not a `0x` address)
+- Self-payment guard
+- PendingPayment stored
+- FlowState → `awaiting_confirmation`
+- Payment Review card sent: [Confirm] [Cancel]
 
-The review message is the execution boundary, not final submission.
+### 2. User Review
 
-## Waiting for confirmation
+User sees the card. Two choices:
+- `[Cancel]` → pending cleared, FlowState → idle
+- `[Confirm]` → execute()
+- Text confirm/cancel → redirected to use buttons
 
-After review opens, the active state becomes a pending payment waiting for confirmation.
+### 3. Execute
 
-Valid follow-ups include:
+1. Balance check: wallet ≥ amount + gas reserve
+2. "Processing payment..." sent
+3. **Approve TX**: encodeApprove → circle.submitTx() → pollTx()
+4. **Pay TX**: router.encodePay() → circle.submitTx() → pollTx()
+5. On success: payment log written, vendor stats updated, success message
 
-- `yes`
-- `cancel`
-- amount update
-- vendor update
-- memo update
+### 4. Poll
 
-Orphan updates after cancellation are rejected safely instead of reviving stale state.
+`circle.pollTx()` polls 15× at 2000ms. Terminal states: COMPLETE, FAILED, CANCELLED, DENIED.
 
-Common natural follow-ups:
+### 5. Cleanup
 
-- `yes`
-- `actually make that 3 instead`
-- `use aws instead`
-- `add memo lunch`
-- `leave that payment alone for now`
+After any outcome: pending cleared, submitted TX cleared, FlowState → idle.
 
-## Submit
+## Restart Recovery
 
-Once confirmed, the payment engine:
+`paymentEngine.reconcile()` at startup:
+- Checks all submitted_txs
+- Calls circle.getTx() once per TX
+- Logs completed payments
+- Clears all records
 
-1. checks balance
-2. checks approval requirements
-3. submits through Circle
-4. records the submitted transaction
+## Payment Sources
 
-## Confirm
-
-After the payment reaches final status:
-
-- submitted state is persisted
-- payment logs are updated
-- stale pending state is cleared
-
-## Schedules
-
-Schedules use the same explicit payment boundary.
-
-They are reminder-driven, not silent autopay. When a schedule becomes due, the bot asks the user to confirm or cancel.
-
-## Invoice-derived payments
-
-Invoice-derived payments carry source metadata so the invoice session can close after successful payment.
+| source.type | Triggered by |
+|-------------|-------------|
+| `user` | Direct message |
+| `schedule` | SchedulerService |
+| `invoice` | InvoiceEngine |
+| `request` | PaymentRequest deep link |

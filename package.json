@@ -2,10 +2,10 @@
     "name": "arcpay-agent",
     "version": "1.0.0",
     "description": "",
-    "main": "dist/index.js",
+    "main": "dist/main.js",
     "scripts": {
-        "dev": "tsx src/index.ts",
-        "start": "node dist/index.js",
+        "dev": "tsx src/main.ts",
+        "start": "node dist/main.js",
         "build": "rm -rf dist && tsc",
         "postinstall": "npm run build",
         "test": "vitest run",

@@ -1,46 +1,23 @@
-# Scenarios
+# Test Scenarios
 
-The `scenarios/` directory is the regression corpus for runtime and live testing.
+| # | Input | Expected |
+|---|-------|---------|
+| 1 | `send 5 usdc to jack` | Payment card with [Confirm] [Cancel] ONLY |
+| 2 | `[Cancel]` → `send 10 eurc to jack` | Fresh card, no stale state |
+| 3 | `send usdc to jack` → `50` | "How much?" → 50 USDC card |
+| 4 | `send $20 to jack` | 20 USDC card, no FX text |
+| 5 | `send 5 usdc to <own_address>` | Error: can't pay yourself |
+| 6 | `list my vendors` | List only, no LLM text above |
+| 7 | `BTC price?` → `thanks` | Price → social reply, no button hallucination |
+| 8 | `alert BTC 100k` twice | Second: "already have this alert" |
+| 9 | Non-English message | English response |
+| 10 | Upload PDF invoice | Analysis card with risk + buttons |
 
-## Main groups
+## SILENT_ACTIONS Check
 
-### Runtime scenarios
-
-Deterministic and interpreter-first scenario coverage.
-
-Examples:
-
-- `runtime-v2-stress.json`
-- `runtime-v2-long-variations.json`
-- `runtime-v2-invoice-session.json`
-- `runtime-v2-invoice-review-policy.json`
-
-### Live family suites
-
-Smaller focused Telegram suites for one area.
-
-### Live ultra suites
-
-Long end-to-end Telegram suites with real money movement and invoice flows.
-
-### Short gauntlet
-
-Terse natural phrasing coverage.
-
-## Practical use
-
-Use runtime scenarios when:
-
-- changing parser or interpreter behavior
-- validating logic locally without Telegram
-
-Use live suites when:
-
-- touching invoice uploads
-- validating real payment confirmation
-- checking schedule behavior
-- confirming that Telegram ingress still matches local runtime expectations
-
-## Acceptance rule
-
-Scenario or live expectation changes should happen only if product behavior intentionally changed. Otherwise the code should be fixed to meet the suite.
+These must show NO LLM text above the action output:
+- `send 5 usdc to jack` → card only
+- `list vendors` → list only
+- `show wallet` → balance only
+- `report` → report only
+- `list schedules` → list only

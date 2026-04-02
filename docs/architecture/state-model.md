@@ -2,106 +2,74 @@
 
 ## FlowState
 
-FlowState is the primary execution guard in the orchestrator.
+`memory/conversation.ts` is the single source of truth for payment flow state.
 
-Stored in `conversationMemory.ts` per user.
+```typescript
+type FlowState = {
+    status: "idle" | "awaiting_amount" | "awaiting_confirmation";
+    since?: number;
+    token?: string;
+    beneficiary?: string;
+};
+```
 
-Values:
+### Transitions
 
-| State | Meaning |
-|---|---|
-| `idle` | No active multi-turn flow. Normal LLM routing. |
-| `payment_awaiting_confirmation` | A payment card is displayed. Orchestrator blocks new payment requests. |
-| `invoice_awaiting_override` | An invoice is `review_required`. Override must come before payment prep. |
+```
+idle
+  ├─ create_payment (with amount)  → awaiting_confirmation
+  ├─ create_payment (no amount)    → awaiting_amount
+  └─ any other action              → stays idle
 
-Lifecycle:
+awaiting_amount
+  └─ user types a number           → create_payment → awaiting_confirmation
 
-- `payment_awaiting_confirmation` is set only when `paymentEngine.preparePayment()` actually produces a card (non-empty return). Early exits (vendor not found, bad address) do not set this state.
-- The state is cleared on Confirm, Cancel, or `/reset`.
+awaiting_confirmation
+  ├─ [Confirm] button              → execute() → idle
+  ├─ [Cancel] button               → clear pending → idle
+  └─ text "yes/no/cancel"          → redirect to button message
+```
 
-## Conversation memory
+### Writers
 
-Per-user in-memory store. Not persisted across restarts.
+Only two places write FlowState:
+1. `core/orchestrator.ts` — sets `awaiting_amount`
+2. `engines/payment.ts` — sets `awaiting_confirmation`, resets to `idle`
 
-Contains:
+### Pending Payment
 
-- recent user / assistant messages (last 30)
-- `lastAction` — last executed action name (fallback for pre-FlowState compatibility)
-- `lastPayment` — last payment amount and recipient for conversational follow-up
-- `lastVendor` — last vendor name touched
-- `lastSchedule` — last schedule created
-- `lastInvoice` — last analyzed invoice (recall only — does not reopen invoice sessions)
-- `flowState` — current FlowState
+```
+created:  paymentEngine.prepare()
+cleared:  paymentEngine.execute() success/failure
+          paymentEngine.processCallback("cancel")
+          paymentEngine.expireOld() (30 min timeout)
+          paymentEngine.reconcile() (startup)
+```
 
-When the 30-message buffer fills, the oldest 10 messages are replaced with a synthetic summary assistant turn so context is not silently lost.
+### Submitted TX
 
-## Episodic memory
+```
+created:  paymentEngine.execute() — before circle.submitTx()
+cleared:  paymentEngine.execute() — after pollTx() terminal
+          paymentEngine.reconcile() — startup recovery
+```
 
-Compact event log per user.
+### Invoice Session Status
 
-Stored in `episodicMemory.ts`.
+```
+uploaded → analyzed → review_required → ready_to_prepare → awaiting_payment → paid/cancelled
+                    → awaiting_override → ready_to_prepare (after override)
+HIGH_RISK: blocked, cannot proceed
+```
 
-Each significant action (payment confirmed, vendor saved, schedule created) appends a short event entry. The last ~20 events are summarized and injected into the LLM context as background history.
+## Conversation Memory Per-User
 
-## Pending payment
-
-Stored before user confirmation.
-
-Used for:
-
-- Confirm button
-- Cancel button
-- amount / vendor / memo update (inline keyboard)
-
-Persisted in `pendingPayments.ts`. Survives restarts.
-
-Invoice-derived pending payments carry source metadata so the invoice session can close after successful payment.
-
-## Submitted transaction
-
-Stored after payment submission starts.
-
-Used for:
-
-- duplicate submit prevention
-- delayed Circle reconciliation
-- restart recovery
-
-Persisted in `submittedTransactions.ts`.
-
-## Confirmed payment log
-
-Stored only after successful terminal completion.
-
-Used for:
-
-- payment history
-- analytics
-- vendor totals
-
-Persisted in `paymentLogs.ts`.
-
-## Invoice session
-
-Owned by `InvoiceEngine`.
-
-States:
-
-| State | Meaning |
-|---|---|
-| `processing` | Upload received, extraction in progress |
-| `ready` | Extraction complete, no risk issues |
-| `review_required` | Risk flags found; explicit override needed before payment prep |
-| `awaiting_payment_confirmation` | Payment card is open for this invoice |
-| `paid` | Payment confirmed; session closed |
-| `cancelled` | User cancelled; session closed |
-
-The invoice session is the execution truth for invoice-specific behavior. `lastInvoice` in conversation memory is recall-only — it does not reopen an invoice session.
-
-## Persistence backend
-
-Default: SQLite.
-
-PostgreSQL enabled with `DATABASE_URL` env var.
-
-The abstraction lives in `src/storage/persistence.ts`.
+```
+messages[]       history (max 100, summarize overflow)
+flowState        current FlowState
+lastAction       last tool name (informational only)
+lastPayment      { beneficiary, amount, token }
+lastVendor       { name, address }
+lastSchedule     { id, beneficiary, amount }
+lastInvoice      { vendor, amount, currency } (recall only — cannot reopen payment)
+```

@@ -1,76 +1,56 @@
 # Invoice Session Lifecycle
 
-Invoices are handled through an active session model, not just loose memory.
+## Status Machine
 
-## Session states
+```
+[File upload]
+     ↓
+  analyzed
+     ├── SAFE + vendor matched     → ready_to_prepare
+     ├── REVIEW + vendor matched   → review_required
+     ├── HIGH_RISK                 → blocked
+     └── vendor not found          → review_required
+     ↓
+  review_required
+     └── "pay it anyway"           → awaiting_override → ready_to_prepare
+     ↓
+  ready_to_prepare
+     └── [Pay Invoice]             → awaiting_payment
+     ↓
+  awaiting_payment
+     └── PaymentEngine.prepare()   → payment flow
+     ↓
+  paid / cancelled
+```
 
-An invoice may move through these states:
+## Risk Levels
 
-- `uploaded`
-- `analyzed`
-- `review_required`
-- `ready_to_prepare`
-- `awaiting_override`
-- `awaiting_payment_confirmation`
-- `paid`
-- `cancelled`
-- `closed`
+| Level | Condition | Can Pay |
+|-------|-----------|---------|
+| SAFE | No flags | Yes |
+| REVIEW | Score 15-39 | Yes, after override |
+| HIGH_RISK | Score ≥ 40 | No |
 
-## Upload behavior
+Risk flags: `HIGH_AMOUNT` (>$10k), `ELEVATED_AMOUNT` (>$1k), `NO_INVOICE_NUMBER`, `NO_DATE`, `UNCOMMON_CURRENCY`
 
-When a PDF or photo arrives:
+## Parsing
 
-1. the file is analyzed
-2. an invoice session is created or replaced
-3. invoice summary is produced
-4. caption text is interpreted within the same turn
+`utils/parser.ts`:
+- PDF → PDFParse class from pdf-parse library
+- Image → tesseract.js OCR (English)
+- Text file → raw UTF-8
 
-Duplicate “analyze this pdf” captions are suppressed so the bot does not ask for a file that was already uploaded.
+`engines/invoice.ts` → LLM JSON completion to extract: vendor, amount, currency, invoiceNumber, date
 
-The summary itself is the primary answer for simple analyze captions.
+## Settlement
 
-## Risk policy
+- USD / USDC → USDC
+- EUR / EURC → EURC
+- Other → USDC + UNCOMMON_CURRENCY flag
 
-### Ready to pay
+## Session Rules
 
-Payment review can open immediately.
-
-### Review required
-
-Payment review does not open automatically.
-
-The user must explicitly override with phrasing like:
-
-- `pay it anyway`
-- `I reviewed it, continue`
-- `go ahead despite that`
-
-### High risk
-
-Payment preparation stays blocked.
-
-## Typical flow
-
-1. upload invoice
-2. review extracted fields
-3. ask `is this safe?`
-4. ask `why is this risky?`
-5. explicitly override if review is required
-6. open payment review
-7. confirm with `yes`
-8. session closes after success
-
-## Post-pay cleanup
-
-After successful confirmation:
-
-- the invoice session closes
-- stale `pay this invoice` turns no longer reopen the old invoice
-- the bot asks for a new invoice upload instead
-
-## Important guarantees
-
-- only one active invoice session exists per chat
-- a new upload replaces the old active session
-- stale `lastInvoice` memory is recall-only
-- once payment review is open, later invoice text should point back to `yes` or `cancel`
+- One active session per user
+- New upload replaces old session
+- Session expires after 30 min
+- After payment: status → paid

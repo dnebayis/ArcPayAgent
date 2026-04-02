@@ -1,82 +1,63 @@
-# Live Regression
+# Manual Regression Guide
 
-Arc Pay Agent uses real Telegram live suites in addition to unit and scenario tests.
+## Critical Path
 
-## Suite groups
+### 1. Payment Card
 
-Live suites are now organized by role, not only by filename.
+```
+send 5 usdc to jack
+```
+MUST: Card appears with [Confirm] and [Cancel]. No extra LLM text above the card.
 
-### Current-flow groups
+```
+[Cancel]     → "Payment cancelled."
+```
+Next `send 5 usdc to jack` must produce a fresh card (no stale state).
 
-- `current-core`
-  Stable release gate for the supported current flow.
-- `current-expanded`
-  Broader natural-language coverage for the contract-native runtime.
-- `current`
-  `current-core` plus `current-expanded`.
+### 2. Confirm Flow
 
-### Development groups
-
-- `development`
-  Stress suites for product expansion work.
-- `development-longterm`
-  Long-term conversational style probes.
-
-### Compatibility-observation groups
-
-- `compatibility-observation`
-  Older live suites kept for historical/compatibility observation, not for the main current-flow gate.
-
-## Core live suites
-
-Primary current-flow gate:
-
-```bash
-npm run telegram:live:current
+```
+send 0.01 usdc to jack
+[Confirm]    → "Processing..." → "Payment of 0.01 USDC to Jack completed. Tx: ..."
 ```
 
-Development expansion pack:
+### 3. Amount Prompt
 
-```bash
-npm run telegram:live:develop
+```
+send usdc to jack    → "How much would you like to send?"
+5                    → payment card for 5 USDC
+[Cancel]
 ```
 
-Development cycle with automatic cleanup and fresh harvest:
+### 4. Text Confirm Blocked
 
-```bash
-npm run telegram:live:cycle:current
-npm run telegram:live:cycle:develop
+```
+send 5 usdc to jack
+yes    → "Please use the Confirm button above"
+[Cancel]
 ```
 
-List all named groups:
+### 5. Invoice
 
-```bash
-npm run telegram:live:list
+```
+[Upload PDF]  → "Processing document..." → invoice analysis card
+is this safe? → risk explanation from LLM
+[Cancel]
 ```
 
-## Restart-per-suite rule
+### 6. LLM Config
 
-Live batches restart the bot between suites so stale local state does not bleed between runs.
-
-Primary command:
-
-```bash
-npm run telegram:live:batch --group current
+```
+/llmkey openai sk-...    → "LLM configured: openai"
+/model gpt-4.1           → "Model changed to: gpt-4.1"
+/llminfo                 → shows provider + model
 ```
 
-## Acceptance
+## Pass Criteria
 
-A live run is considered healthy when:
-
-- audited failures are zero
-- warnings are only unmatched external Telegram noise
-- real payment and invoice confirmation paths still succeed
-
-## Operator notes
-
-- stop stray local bot instances before manual live work
-- prefer the batch runner when validating multiple suites
-- keep real-money tests tiny
-- treat suite expectation drift as a code bug unless product behavior intentionally changed
-- use `current-core` as the release gate, and `development` as the place to grow the product surface
-- when a development suite exposes a durable supported behavior, promote it into a current-flow group instead of leaving it as a one-off probe
+- [ ] Payment card shows NO extra LLM text above it
+- [ ] [Cancel] cleans up state completely
+- [ ] [Confirm] completes payment and shows tx link
+- [ ] Invoice PDF is parsed (not empty text)
+- [ ] No Turkish text in any response
+- [ ] /llmkey, /model, /provider all work
