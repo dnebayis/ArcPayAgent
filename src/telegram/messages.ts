@@ -130,6 +130,16 @@ export function attachMessageHandlers(bot: TelegramBot, deps: BotDeps): void {
             return;
         }
 
+        if (msg.text === "/watch_payments_enable" || msg.text === "/watch") {
+            await deps.orchestrator.handleMessage(chatId, "enable payment notifications");
+            return;
+        }
+
+        if (msg.text === "/watch_payments_disable") {
+            await deps.orchestrator.handleMessage(chatId, "disable payment notifications");
+            return;
+        }
+
         if (msg.text) {
             await deps.orchestrator.handleMessage(chatId, msg.text);
         }

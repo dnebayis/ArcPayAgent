@@ -78,12 +78,23 @@ ERC8004_VALIDATION_REGISTRY=0x8004Cb1BF31DAf7788923b405b754f57acEB4272
 
 ### SQLite (default)
 
-Stored at `data/arcpay.sqlite`. Mount a persistent volume at `data/` in containers.
+Single file at `data/arcpay.sqlite`. Uses WAL mode for crash safety and fast writes.
+
+**In containers:** mount a persistent volume at `/app/data` so the file survives restarts.
+Without a volume, all user data (LLM keys, wallets, vendors, schedules) is lost on every restart.
 
 ### PostgreSQL
 
 Set `DATABASE_URL=postgres://...` — the `kv` table is created automatically on first boot.
-SSL is auto-enabled for non-localhost connections (required by Northflank, Railway, Render, etc.).
+SSL is auto-enabled for non-localhost connections (Northflank, Railway, Render, etc.).
+
+### Which to use?
+
+| Scenario | Recommendation |
+|----------|---------------|
+| Single instance, persistent volume available | SQLite (default) |
+| Multiple instances / high availability | PostgreSQL |
+| Quick local dev | SQLite (default, no config needed) |
 
 ## Health Check
 
@@ -104,9 +115,13 @@ Port:            3000
 Health path:     /health
 ```
 
-- Attach a persistent volume at `/app/data` if using SQLite
-- Use a Northflank PostgreSQL addon and set `DATABASE_URL` for durability
-- Add secrets: `TELEGRAM_TOKEN`, `CIRCLE_API_KEY`, `CIRCLE_ENTITY_SECRET`, `LLM_KEY_SECRET`
+**Persistence (required — choose one):**
+- Option A: Attach a persistent volume at `/app/data` — uses SQLite automatically
+- Option B: Add a PostgreSQL addon → set `DATABASE_URL` env var
+
+Without one of these, user LLM keys and wallet data are wiped on every restart.
+
+Add secrets: `TELEGRAM_TOKEN`, `CIRCLE_API_KEY`, `CIRCLE_ENTITY_SECRET`, `LLM_KEY_SECRET`
 
 ## Startup Sequence
 

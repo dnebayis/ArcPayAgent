@@ -4,7 +4,7 @@ import type { ScheduleStore } from "../store/schedules";
 import type { VendorStore } from "../store/vendors";
 import type { WalletStore } from "../store/wallets";
 import type { ConversationMemory } from "../memory/conversation";
-import { parseScheduleTime, parseFrequency, type Frequency } from "../utils/dates";
+import { parseScheduleTime, parseFrequency, advanceSchedule, type Frequency } from "../utils/dates";
 
 export interface PaymentActionDeps {
     paymentEngine: PaymentEngine;
@@ -58,9 +58,14 @@ export function registerPaymentActions(deps: PaymentActionDeps): void {
         }
 
         const freq = parseFrequency(frequency || "once");
-        const nextExecution = schedule_time
-            ? parseScheduleTime(schedule_time)?.getTime() || Date.now() + 60_000
-            : Date.now() + 60_000;
+
+        // Parse schedule_time; for recurring schedules default to tomorrow at 9 AM
+        let nextExecution: number;
+        if (schedule_time) {
+            nextExecution = parseScheduleTime(schedule_time)?.getTime() ?? defaultNextExecution(freq);
+        } else {
+            nextExecution = defaultNextExecution(freq);
+        }
 
         const schedule = await deps.schedules.createSchedule(chatId, {
             vendor: vendorName,
@@ -108,13 +113,55 @@ export function registerPaymentActions(deps: PaymentActionDeps): void {
             return;
         }
 
+        const fmt = (ts: number) => new Date(ts).toLocaleString("en-US", {
+            month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
+        });
+
         let text = "Active Schedules\n\n";
         for (const s of schedules) {
-            const next = new Date(s.nextExecution).toLocaleString("en-US", {
-                month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
-            });
-            text += `ID: ${s.id}\n  ${s.amount.toFixed(2)} ${s.token} to ${s.vendor} (${s.frequency})\n  Next: ${next}\n\n`;
+            text += `ID: ${s.id}\n`;
+            text += `  ${s.amount.toFixed(2)} ${s.token} to ${s.vendor} (${s.frequency})\n`;
+
+            if (s.frequency === "once") {
+                text += `  Date: ${fmt(s.nextExecution)}\n`;
+            } else {
+                // Show next 4 upcoming dates
+                const upcoming: number[] = [];
+                let d = new Date(s.nextExecution);
+                for (let i = 0; i < 4; i++) {
+                    upcoming.push(d.getTime());
+                    const next = advanceSchedule(d, s.frequency as Frequency);
+                    if (!next) break;
+                    d = next;
+                }
+                text += `  Upcoming:\n`;
+                for (const ts of upcoming) {
+                    text += `    ${fmt(ts)}\n`;
+                }
+            }
+            text += "\n";
         }
         await deps.send(chatId, text);
     });
+}
+
+/**
+ * Sensible default next execution for recurring schedules when no time is given.
+ * - once    → 5 minutes from now
+ * - daily   → tomorrow at 09:00
+ * - weekly  → next week, same weekday, at 09:00
+ * - monthly → same day next month at 09:00
+ */
+function defaultNextExecution(freq: Frequency): number {
+    const d = new Date();
+    if (freq === "once") return Date.now() + 5 * 60_000;
+    d.setHours(9, 0, 0, 0);
+    if (freq === "daily") {
+        d.setDate(d.getDate() + 1);
+    } else if (freq === "weekly") {
+        d.setDate(d.getDate() + 7);
+    } else if (freq === "monthly") {
+        d.setMonth(d.getMonth() + 1);
+    }
+    return d.getTime();
 }
