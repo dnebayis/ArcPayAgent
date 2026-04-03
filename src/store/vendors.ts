@@ -1,4 +1,4 @@
-import { Store } from "./base";
+import { DB } from "./db";
 
 export interface VendorData {
     address: string;
@@ -8,98 +8,89 @@ export interface VendorData {
     lastPayment?: number;
 }
 
-const NS = "vendors";
-
-/** Compound row key: "{chatId}:{vendorName}" */
-const rowKey = (chatId: number, name: string) => `${chatId}:${name}`;
-
 export class VendorStore {
-    /**
-     * Namespace : vendors
-     * Key pattern: {chatId}:{vendorName}  (vendorName is lowercased)
-     * Value type : VendorData
-     */
-    constructor(private store: Store) {}
+    constructor(private db: DB) {}
 
     async saveVendor(chatId: number, name: string, address: string): Promise<void> {
         const key = name.toLowerCase();
-        const existing = await this.store.get<VendorData>(NS, rowKey(chatId, key));
-        const vendor: VendorData = {
-            address,
-            displayName: name,
-            totalPaid: existing?.totalPaid ?? 0,
-            paymentCount: existing?.paymentCount ?? 0,
-            lastPayment: existing?.lastPayment,
-        };
-        await this.store.set(NS, rowKey(chatId, key), vendor);
+        await this.db.run(
+            `INSERT INTO vendors (chat_id,name,display_name,address,total_paid,payment_count)
+             VALUES ($1,$2,$3,$4,0,0)
+             ON CONFLICT (chat_id,name) DO UPDATE SET display_name=$3, address=$4`,
+            [chatId, key, name, address]
+        );
     }
 
     async getVendor(chatId: number, name: string): Promise<VendorData | null> {
-        return this.store.get<VendorData>(NS, rowKey(chatId, name.toLowerCase()));
+        const row = await this.db.queryOne<any>(
+            "SELECT * FROM vendors WHERE chat_id=$1 AND name=$2", [chatId, name.toLowerCase()]
+        );
+        return row ? rowToVendor(row) : null;
     }
 
     async findVendor(chatId: number, query: string): Promise<{ name: string; data: VendorData } | null> {
         const all = await this.listVendors(chatId);
         const q = query.toLowerCase();
-
-        // Exact match first
         if (all[q]) return { name: q, data: all[q] };
 
-        // Fuzzy match
         let best: { name: string; data: VendorData; score: number } | null = null;
         for (const [name, data] of Object.entries(all)) {
             const score = bigramSimilarity(q, name);
-            if (score >= 0.5 && (!best || score > best.score)) {
-                best = { name, data, score };
-            }
+            if (score >= 0.5 && (!best || score > best.score)) best = { name, data, score };
         }
         return best ? { name: best.name, data: best.data } : null;
     }
 
     async listVendors(chatId: number): Promise<Record<string, VendorData>> {
-        const prefix = `${chatId}:`;
-        const raw = await this.store.getByPrefix<VendorData>(NS, prefix);
+        const rows = await this.db.query<any>("SELECT * FROM vendors WHERE chat_id=$1", [chatId]);
         const result: Record<string, VendorData> = {};
-        for (const [k, v] of Object.entries(raw)) {
-            result[k.slice(prefix.length)] = v;
-        }
+        for (const row of rows) result[row.name] = rowToVendor(row);
         return result;
     }
 
     async removeVendor(chatId: number, name: string): Promise<boolean> {
-        const key = name.toLowerCase();
-        const existing = await this.store.get<VendorData>(NS, rowKey(chatId, key));
-        if (!existing) return false;
-        await this.store.delete(NS, rowKey(chatId, key));
+        const row = await this.db.queryOne<any>(
+            "SELECT 1 FROM vendors WHERE chat_id=$1 AND name=$2", [chatId, name.toLowerCase()]
+        );
+        if (!row) return false;
+        await this.db.run("DELETE FROM vendors WHERE chat_id=$1 AND name=$2", [chatId, name.toLowerCase()]);
         return true;
     }
 
     async removeAll(chatId: number): Promise<number> {
-        const all = await this.listVendors(chatId);
-        const count = Object.keys(all).length;
-        for (const name of Object.keys(all)) {
-            await this.store.delete(NS, rowKey(chatId, name));
-        }
+        const rows = await this.db.query<any>(
+            "SELECT count(*) as cnt FROM vendors WHERE chat_id=$1", [chatId]
+        );
+        const count = Number(rows[0]?.cnt ?? 0);
+        await this.db.run("DELETE FROM vendors WHERE chat_id=$1", [chatId]);
         return count;
     }
 
     async recordPayment(chatId: number, name: string, amount: number): Promise<void> {
-        const key = name.toLowerCase();
-        const v = await this.store.get<VendorData>(NS, rowKey(chatId, key));
-        if (!v) return;
-        v.totalPaid = (v.totalPaid || 0) + amount;
-        v.paymentCount = (v.paymentCount || 0) + 1;
-        v.lastPayment = Date.now();
-        await this.store.set(NS, rowKey(chatId, key), v);
+        await this.db.run(
+            `UPDATE vendors SET total_paid=total_paid+$1, payment_count=payment_count+1, last_payment=$2
+             WHERE chat_id=$3 AND name=$4`,
+            [amount, Date.now(), chatId, name.toLowerCase()]
+        );
     }
 
     async getTopVendors(chatId: number, limit = 5): Promise<Array<{ name: string; data: VendorData }>> {
-        const all = await this.listVendors(chatId);
-        return Object.entries(all)
-            .map(([name, data]) => ({ name, data }))
-            .sort((a, b) => (b.data.totalPaid || 0) - (a.data.totalPaid || 0))
-            .slice(0, limit);
+        const rows = await this.db.query<any>(
+            "SELECT * FROM vendors WHERE chat_id=$1 ORDER BY total_paid DESC LIMIT $2",
+            [chatId, limit]
+        );
+        return rows.map(row => ({ name: row.name, data: rowToVendor(row) }));
     }
+}
+
+function rowToVendor(row: any): VendorData {
+    return {
+        address: row.address,
+        displayName: row.display_name,
+        totalPaid: Number(row.total_paid),
+        paymentCount: Number(row.payment_count),
+        lastPayment: row.last_payment ? Number(row.last_payment) : undefined,
+    };
 }
 
 function bigrams(str: string): Set<string> {

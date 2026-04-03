@@ -9,7 +9,7 @@ import { ArcRouter } from "./chain/router";
 import { ERC8004Client } from "./chain/erc8004";
 
 // Store
-import { Store } from "./store/base";
+import { DB } from "./store/db";
 import { WalletStore } from "./store/wallets";
 import { VendorStore } from "./store/vendors";
 import { PendingPaymentStore } from "./store/pending";
@@ -74,20 +74,20 @@ async function main(): Promise<void> {
     const erc8004 = new ERC8004Client(provider, config.ERC8004_IDENTITY_REGISTRY, config.ERC8004_REPUTATION_REGISTRY, config.ERC8004_VALIDATION_REGISTRY);
 
     // ─── Store layer ───
-    const store = new Store("data");
-    await store.init();
-    const wallets = new WalletStore(store);
-    const vendors = new VendorStore(store);
-    const pending = new PendingPaymentStore(store);
-    const submitted = new SubmittedTxStore(store);
-    const paymentLog = new PaymentLogStore(store);
-    const schedules = new ScheduleStore(store);
-    const alerts = new AlertStore(store);
-    const watch = new WatchStore(store);
-    const invoices = new InvoiceStore(store);
-    const requests = new PaymentRequestStore(store);
-    const keys = new LLMKeyStore(store, config.LLM_KEY_SECRET);
-    const identityStore = new AgentIdentityStore(store);
+    const db = new DB("data");
+    await db.init();
+    const wallets = new WalletStore(db);
+    const vendors = new VendorStore(db);
+    const pending = new PendingPaymentStore(db);
+    const submitted = new SubmittedTxStore(db);
+    const paymentLog = new PaymentLogStore(db);
+    const schedules = new ScheduleStore(db);
+    const alerts = new AlertStore(db);
+    const watch = new WatchStore(db);
+    const invoices = new InvoiceStore(db);
+    const requests = new PaymentRequestStore(db);
+    const keys = new LLMKeyStore(db, config.LLM_KEY_SECRET);
+    const identityStore = new AgentIdentityStore(db);
 
     // ─── Memory ───
     const memory = new ConversationMemory();
@@ -162,12 +162,13 @@ async function main(): Promise<void> {
     });
 
     // ─── Graceful shutdown ───
-    const shutdown = () => {
+    const shutdown = async () => {
         logger.info(null, "Shutting down...");
         scheduler.stop();
         watcher.stop();
         alerter.stop();
         bot.stopPolling?.();
+        await db.close();
         process.exit(0);
     };
     process.on("SIGINT", shutdown);

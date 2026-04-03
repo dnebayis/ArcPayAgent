@@ -1,5 +1,5 @@
 import { nanoid } from "nanoid";
-import { Store } from "./base";
+import { DB } from "./db";
 
 export interface PaymentLog {
     id: string;
@@ -12,42 +12,52 @@ export interface PaymentLog {
     txHash?: string;
 }
 
-const NS = "payments";
-
-/** Compound row key: "{chatId}:{id}" */
-const rowKey = (chatId: number, id: string) => `${chatId}:${id}`;
-
 export class PaymentLogStore {
-    /**
-     * Namespace : payments
-     * Key pattern: {chatId}:{id}
-     * Value type : PaymentLog
-     */
-    constructor(private store: Store) {}
+    constructor(private db: DB) {}
 
     async logPayment(chatId: number, entry: Omit<PaymentLog, "id"> & { id?: string }): Promise<void> {
         const id = entry.id ?? nanoid(10);
-        const log: PaymentLog = { id, ...entry };
-        await this.store.set(NS, rowKey(chatId, id), log);
+        await this.db.run(
+            `INSERT INTO payments (id,chat_id,vendor,address,amount,token,timestamp,memo,tx_hash)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT (id) DO NOTHING`,
+            [id, chatId, entry.vendor, entry.address, entry.amount, entry.token,
+             entry.timestamp, entry.memo ?? null, entry.txHash ?? null]
+        );
     }
 
     async getPayments(chatId: number): Promise<PaymentLog[]> {
-        return this.getAll(chatId);
+        const rows = await this.db.query<any>(
+            "SELECT * FROM payments WHERE chat_id=$1 ORDER BY timestamp DESC", [chatId]
+        );
+        return rows.map(rowToPayment);
     }
 
     async getPaymentsSince(chatId: number, since: number): Promise<PaymentLog[]> {
-        const logs = await this.getAll(chatId);
-        return logs.filter(l => l.timestamp >= since);
+        const rows = await this.db.query<any>(
+            "SELECT * FROM payments WHERE chat_id=$1 AND timestamp>=$2 ORDER BY timestamp DESC",
+            [chatId, since]
+        );
+        return rows.map(rowToPayment);
     }
 
     async getRecentPayments(chatId: number, limit = 10): Promise<PaymentLog[]> {
-        const logs = await this.getAll(chatId);
-        return logs.slice(-limit).reverse();
+        const rows = await this.db.query<any>(
+            "SELECT * FROM payments WHERE chat_id=$1 ORDER BY timestamp DESC LIMIT $2",
+            [chatId, limit]
+        );
+        return rows.map(rowToPayment);
     }
+}
 
-    private async getAll(chatId: number): Promise<PaymentLog[]> {
-        const prefix = `${chatId}:`;
-        const raw = await this.store.getByPrefix<PaymentLog>(NS, prefix);
-        return Object.values(raw).sort((a, b) => a.timestamp - b.timestamp);
-    }
+function rowToPayment(row: any): PaymentLog {
+    return {
+        id: row.id,
+        vendor: row.vendor,
+        address: row.address,
+        amount: Number(row.amount),
+        token: row.token as "USDC" | "EURC",
+        timestamp: Number(row.timestamp),
+        memo: row.memo ?? undefined,
+        txHash: row.tx_hash ?? undefined,
+    };
 }

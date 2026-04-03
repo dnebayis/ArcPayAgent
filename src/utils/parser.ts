@@ -28,20 +28,18 @@ function isPdf(buffer: Buffer): boolean {
 
 async function extractPdf(buffer: Buffer): Promise<string> {
     const { PDFParse } = await import("pdf-parse") as any;
-    const parser = new PDFParse({});
-    await parser.load(buffer);
-    const pages: string[] = [];
-    const numPages = parser.getInfo()?.numPages ?? 0;
-    for (let i = 1; i <= Math.min(numPages, 20); i++) {
-        try {
-            const pageText: string = await parser.getPageText(i);
-            if (pageText?.trim()) pages.push(pageText.trim());
-        } catch {
-            // skip unreadable page
-        }
+    // data must be passed in constructor as Uint8Array/Buffer
+    const parser = new PDFParse({ data: new Uint8Array(buffer) });
+    try {
+        const result = await parser.getText({ max: 20 });
+        // result.pages: Array<{ text: string; num: number }>
+        const pages: string[] = (result.pages as Array<{ text: string; num: number }>)
+            .map(p => p.text?.trim())
+            .filter(Boolean);
+        return pages.join("\n\n");
+    } finally {
+        await parser.destroy();
     }
-    parser.destroy();
-    return pages.join("\n\n");
 }
 
 async function extractImage(buffer: Buffer): Promise<string> {

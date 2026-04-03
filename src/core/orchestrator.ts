@@ -168,7 +168,12 @@ export class Orchestrator {
                 }
             } catch (err: any) {
                 logger.error(chatId, "[Orchestrator] LLM error", { error: err.message, iteration: i });
-                await this.sender.send(chatId, "Something went wrong. Please try again.");
+                const hint = err.message?.includes("401") ? " (check your API key)"
+                    : err.message?.includes("429") ? " (rate limited)"
+                    : err.message?.includes("404") ? " (model not found — try: /model <name>)"
+                    : err.message?.includes("abort") ? " (request timed out)"
+                    : "";
+                await this.sender.send(chatId, `LLM error${hint}. Try again or use /model to change the model.`);
                 break;
             }
         }
@@ -194,6 +199,25 @@ export class Orchestrator {
                     `LLM configured: ${provider}\nYour key is stored encrypted.\n\nYou can now use natural language to interact with ArcPay.`
                 );
                 return true;
+            }
+        }
+
+        // model <name> / set model <name> — works without LLM key too
+        const modelMatch = t.match(/^(?:set\s+)?model\s+(\S+)$/);
+        if (modelMatch) {
+            const model = modelMatch[1];
+            const ok = await this.keys.setModel(chatId, model);
+            if (ok) { await this.sender.send(chatId, `Model changed to: ${model}`); return true; }
+            // No key — fall through to show the no-key message
+        }
+
+        // provider <name> / set provider <name>
+        const providerMatch = t.match(/^(?:set\s+)?(?:change\s+)?provider\s+(?:to\s+)?(\S+)$/);
+        if (providerMatch) {
+            const provider = providerMatch[1].toLowerCase();
+            if (VALID_PROVIDERS.includes(provider)) {
+                const ok = await this.keys.setProvider(chatId, provider);
+                if (ok) { await this.sender.send(chatId, `Provider changed to: ${provider}`); return true; }
             }
         }
 

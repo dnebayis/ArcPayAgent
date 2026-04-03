@@ -1,5 +1,5 @@
 import { nanoid } from "nanoid";
-import { Store } from "./base";
+import { DB } from "./db";
 
 export interface PriceAlert {
     id: string;
@@ -12,92 +12,80 @@ export interface PriceAlert {
     triggeredAt?: number;
 }
 
-const NS = "alerts";
-
-/** Compound row key: "{chatId}:{alertId}" */
-const rowKey = (chatId: number, alertId: string) => `${chatId}:${alertId}`;
-
 export class AlertStore {
-    /**
-     * Namespace : alerts
-     * Key pattern: {chatId}:{alertId}
-     * Value type : PriceAlert
-     */
-    constructor(private store: Store) {}
+    constructor(private db: DB) {}
 
     async createAlert(
-        chatId: number, opts: { symbol: string; targetPrice: number; direction: "above" | "below" }
+        chatId: number,
+        opts: { symbol: string; targetPrice: number; direction: "above" | "below" }
     ): Promise<PriceAlert | null> {
-        const { symbol, targetPrice, direction } = opts;
-        const all = await this.getAll(chatId);
-
-        // Dedup: same symbol + direction + price = already exists
-        const dup = all.find(a =>
-            a.active && !a.triggered &&
-            a.symbol === symbol.toUpperCase() &&
-            a.direction === direction &&
-            a.targetPrice === targetPrice
+        const sym = opts.symbol.toUpperCase();
+        const dup = await this.db.queryOne<any>(
+            `SELECT 1 FROM price_alerts WHERE chat_id=$1 AND symbol=$2 AND direction=$3
+             AND target_price=$4 AND active=1 AND triggered=0`,
+            [chatId, sym, opts.direction, opts.targetPrice]
         );
         if (dup) return null;
 
-        const alert: PriceAlert = {
-            id: nanoid(10),
-            symbol: symbol.toUpperCase(),
-            targetPrice,
-            direction,
-            active: true,
-            triggered: false,
-            createdAt: Date.now(),
-        };
-        await this.store.set(NS, rowKey(chatId, alert.id), alert);
-        return alert;
+        const id = nanoid(10);
+        const now = Date.now();
+        await this.db.run(
+            `INSERT INTO price_alerts (id,chat_id,symbol,target_price,direction,active,triggered,created_at)
+             VALUES ($1,$2,$3,$4,$5,1,0,$6)`,
+            [id, chatId, sym, opts.targetPrice, opts.direction, now]
+        );
+        return { id, symbol: sym, targetPrice: opts.targetPrice, direction: opts.direction, active: true, triggered: false, createdAt: now };
     }
 
     async getAlerts(chatId: number): Promise<PriceAlert[]> {
-        const all = await this.getAll(chatId);
-        return all.filter(a => a.active && !a.triggered);
+        const rows = await this.db.query<any>(
+            "SELECT * FROM price_alerts WHERE chat_id=$1 AND active=1 AND triggered=0", [chatId]
+        );
+        return rows.map(rowToAlert);
     }
 
     async getAllActiveAlerts(): Promise<Array<{ chatId: number; alert: PriceAlert }>> {
-        const allNs = await this.store.getAll<PriceAlert>(NS);
-        const result: Array<{ chatId: number; alert: PriceAlert }> = [];
-        for (const [key, alert] of Object.entries(allNs)) {
-            if (alert.active && !alert.triggered) {
-                const chatId = parseInt(key.split(":")[0], 10);
-                result.push({ chatId, alert });
-            }
-        }
-        return result;
+        const rows = await this.db.query<any>(
+            "SELECT * FROM price_alerts WHERE active=1 AND triggered=0"
+        );
+        return rows.map(row => ({ chatId: Number(row.chat_id), alert: rowToAlert(row) }));
     }
 
     async markTriggered(chatId: number, alertId: string): Promise<void> {
-        const a = await this.store.get<PriceAlert>(NS, rowKey(chatId, alertId));
-        if (a) {
-            a.triggered = true;
-            a.triggeredAt = Date.now();
-            await this.store.set(NS, rowKey(chatId, alertId), a);
-        }
+        await this.db.run(
+            "UPDATE price_alerts SET triggered=1, triggered_at=$1 WHERE chat_id=$2 AND id=$3",
+            [Date.now(), chatId, alertId]
+        );
     }
 
     async removeAlert(chatId: number, alertId: string): Promise<boolean> {
-        const existing = await this.store.get<PriceAlert>(NS, rowKey(chatId, alertId));
-        if (!existing) return false;
-        await this.store.delete(NS, rowKey(chatId, alertId));
+        const row = await this.db.queryOne<any>(
+            "SELECT 1 FROM price_alerts WHERE chat_id=$1 AND id=$2", [chatId, alertId]
+        );
+        if (!row) return false;
+        await this.db.run("DELETE FROM price_alerts WHERE chat_id=$1 AND id=$2", [chatId, alertId]);
         return true;
     }
 
     async removeAllAlerts(chatId: number): Promise<number> {
-        const all = await this.getAll(chatId);
-        const count = all.length;
-        for (const a of all) {
-            await this.store.delete(NS, rowKey(chatId, a.id));
-        }
+        const rows = await this.db.query<any>(
+            "SELECT count(*) as cnt FROM price_alerts WHERE chat_id=$1", [chatId]
+        );
+        const count = Number(rows[0]?.cnt ?? 0);
+        await this.db.run("DELETE FROM price_alerts WHERE chat_id=$1", [chatId]);
         return count;
     }
+}
 
-    private async getAll(chatId: number): Promise<PriceAlert[]> {
-        const prefix = `${chatId}:`;
-        const raw = await this.store.getByPrefix<PriceAlert>(NS, prefix);
-        return Object.values(raw);
-    }
+function rowToAlert(row: any): PriceAlert {
+    return {
+        id: row.id,
+        symbol: row.symbol,
+        targetPrice: Number(row.target_price),
+        direction: row.direction as "above" | "below",
+        active: !!row.active,
+        triggered: !!row.triggered,
+        createdAt: Number(row.created_at),
+        triggeredAt: row.triggered_at ? Number(row.triggered_at) : undefined,
+    };
 }

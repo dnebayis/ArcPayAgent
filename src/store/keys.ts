@@ -1,29 +1,16 @@
-import { Store } from "./base";
+import { DB } from "./db";
 import { encrypt, decrypt } from "../security/vault";
 import { logger } from "../utils/logger";
 
-interface LLMKeyData {
-    provider: string;
-    encryptedKey: string;
-    model?: string;
-}
-
-const NS = "keys";
-
 export class LLMKeyStore {
-    /**
-     * Namespace : keys
-     * Key pattern: {chatId}
-     * Value type : LLMKeyData
-     */
-    constructor(private store: Store, private secret: string) {}
+    constructor(private db: DB, private secret: string) {}
 
     async getKey(chatId: number): Promise<{ provider: string; key: string; model?: string } | null> {
-        const data = await this.store.get<LLMKeyData>(NS, String(chatId));
-        if (!data) return null;
+        const row = await this.db.queryOne<any>("SELECT * FROM llm_keys WHERE chat_id=$1", [chatId]);
+        if (!row) return null;
         try {
-            const key = decrypt(data.encryptedKey, this.secret);
-            return { provider: data.provider, key, model: data.model };
+            const key = decrypt(row.encrypted_key, this.secret);
+            return { provider: row.provider, key, model: row.model ?? undefined };
         } catch (err: any) {
             logger.error(chatId, "[KeyStore] Decryption failed — LLM_KEY_SECRET may have changed", { error: err?.message });
             return null;
@@ -32,37 +19,38 @@ export class LLMKeyStore {
 
     async setKey(chatId: number, provider: string, apiKey: string, model?: string): Promise<void> {
         const encryptedKey = encrypt(apiKey, this.secret);
-        await this.store.set(NS, String(chatId), { provider, encryptedKey, model } satisfies LLMKeyData);
+        await this.db.run(
+            `INSERT INTO llm_keys (chat_id,provider,encrypted_key,model) VALUES ($1,$2,$3,$4)
+             ON CONFLICT (chat_id) DO UPDATE SET provider=$2,encrypted_key=$3,model=$4`,
+            [chatId, provider, encryptedKey, model ?? null]
+        );
     }
 
     async removeKey(chatId: number): Promise<void> {
-        await this.store.delete(NS, String(chatId));
+        await this.db.run("DELETE FROM llm_keys WHERE chat_id=$1", [chatId]);
     }
 
     async hasKey(chatId: number): Promise<boolean> {
-        return !!(await this.store.get(NS, String(chatId)));
+        return !!(await this.db.queryOne("SELECT 1 FROM llm_keys WHERE chat_id=$1", [chatId]));
     }
 
     async setModel(chatId: number, model: string): Promise<boolean> {
-        const data = await this.store.get<LLMKeyData>(NS, String(chatId));
-        if (!data) return false;
-        data.model = model;
-        await this.store.set(NS, String(chatId), data);
+        if (!(await this.hasKey(chatId))) return false;
+        await this.db.run("UPDATE llm_keys SET model=$1 WHERE chat_id=$2", [model, chatId]);
         return true;
     }
 
     async setProvider(chatId: number, provider: string): Promise<boolean> {
-        const data = await this.store.get<LLMKeyData>(NS, String(chatId));
-        if (!data) return false;
-        data.provider = provider;
-        await this.store.set(NS, String(chatId), data);
+        if (!(await this.hasKey(chatId))) return false;
+        await this.db.run("UPDATE llm_keys SET provider=$1 WHERE chat_id=$2", [provider, chatId]);
         return true;
     }
 
     async getInfo(chatId: number): Promise<{ provider: string; model?: string } | null> {
-        const data = await this.store.get<LLMKeyData>(NS, String(chatId));
-        if (!data) return null;
-        return { provider: data.provider, model: data.model };
+        const row = await this.db.queryOne<any>(
+            "SELECT provider, model FROM llm_keys WHERE chat_id=$1", [chatId]
+        );
+        return row ? { provider: row.provider, model: row.model ?? undefined } : null;
     }
 
     async getAuth(chatId: number): Promise<{ provider: string; key: string; model?: string } | null> {

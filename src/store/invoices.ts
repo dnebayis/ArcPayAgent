@@ -1,4 +1,4 @@
-import { Store } from "./base";
+import { DB } from "./db";
 
 export interface InvoiceSession {
     id: string;
@@ -35,28 +35,52 @@ export interface InvoiceSession {
     expiresAt: number;
 }
 
-const NS = "invoices";
-
 export class InvoiceStore {
-    constructor(private store: Store) {}
+    constructor(private db: DB) {}
 
     async getSession(chatId: number): Promise<InvoiceSession | null> {
-        return this.store.get<InvoiceSession>(NS, String(chatId));
+        const row = await this.db.queryOne<any>(
+            "SELECT * FROM invoice_sessions WHERE chat_id=$1", [chatId]
+        );
+        return row ? rowToSession(row) : null;
     }
 
     async saveSession(chatId: number, session: InvoiceSession): Promise<void> {
-        await this.store.set(NS, String(chatId), session);
+        await this.db.run(
+            `INSERT INTO invoice_sessions
+               (chat_id,session_id,status,invoice_data,risk,resolution,source_message_id,opened_at,expires_at)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+             ON CONFLICT (chat_id) DO UPDATE SET
+               session_id=$2,status=$3,invoice_data=$4,risk=$5,resolution=$6,
+               source_message_id=$7,opened_at=$8,expires_at=$9`,
+            [chatId, session.id, session.status,
+             JSON.stringify(session.invoice),
+             session.risk ? JSON.stringify(session.risk) : null,
+             session.resolution ? JSON.stringify(session.resolution) : null,
+             session.sourceMessageId ?? null, session.openedAt, session.expiresAt]
+        );
     }
 
     async clearSession(chatId: number): Promise<void> {
-        await this.store.delete(NS, String(chatId));
+        await this.db.run("DELETE FROM invoice_sessions WHERE chat_id=$1", [chatId]);
     }
 
     async updateStatus(chatId: number, status: InvoiceSession["status"]): Promise<void> {
-        const session = await this.getSession(chatId);
-        if (session) {
-            session.status = status;
-            await this.store.set(NS, String(chatId), session);
-        }
+        await this.db.run(
+            "UPDATE invoice_sessions SET status=$1 WHERE chat_id=$2", [status, chatId]
+        );
     }
+}
+
+function rowToSession(row: any): InvoiceSession {
+    return {
+        id: row.session_id,
+        status: row.status,
+        invoice: JSON.parse(row.invoice_data),
+        risk: row.risk ? JSON.parse(row.risk) : undefined,
+        resolution: row.resolution ? JSON.parse(row.resolution) : undefined,
+        sourceMessageId: row.source_message_id ? Number(row.source_message_id) : undefined,
+        openedAt: Number(row.opened_at),
+        expiresAt: Number(row.expires_at),
+    };
 }

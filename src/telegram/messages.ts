@@ -35,70 +35,72 @@ export function attachMessageHandlers(bot: TelegramBot, deps: BotDeps): void {
 
         if (msg.text === "/start") {
             await deps.sender.send(chatId,
-                "ArcPay Agent\n" +
-                "━━━━━━━━━━━━━━━━━━━━\n" +
-                "AI payment assistant on Arc Network.\n\n" +
-                "First steps:\n" +
-                "  create wallet       → set up your wallet\n" +
-                "  show wallet         → check balance\n" +
-                "  send 5 USDC to alice  → make a payment\n\n" +
-                "More you can do:\n" +
-                "  list vendors        → saved contacts\n" +
-                "  report              → spending overview\n" +
-                "  schedule payment    → recurring transfers\n" +
-                "  BTC price           → live crypto prices\n" +
-                "  upload invoice      → PDF/image analysis\n\n" +
-                "Testnet USDC:\n" +
-                "  faucet              → get faucet link\n\n" +
-                "AI setup — just type one of these:\n" +
-                "  openai <your-key>\n" +
-                "  anthropic <your-key>\n" +
-                "  gemini <your-key>\n\n" +
-                "Follow us: x.com/ArcPayAgent"
+                "<b>ArcPay Agent</b>\n" +
+                "AI-powered payment assistant on Arc Network.\n\n" +
+                "<b>Get started</b>\n" +
+                "• <code>create wallet</code> — set up your wallet\n" +
+                "• <code>show wallet</code> — check your balance\n" +
+                "• <code>send 5 USDC to alice</code> — make a payment\n\n" +
+                "<b>What else you can do</b>\n" +
+                "• <code>list vendors</code> — saved contacts\n" +
+                "• <code>report</code> — spending overview\n" +
+                "• <code>schedule 10 USDC to bob weekly</code> — recurring payments\n" +
+                "• <code>BTC price</code> — live crypto prices\n" +
+                "• Upload a PDF or image — invoice analysis\n\n" +
+                "<b>Testnet USDC</b>\n" +
+                "• <code>faucet</code> — get the faucet link\n\n" +
+                "<b>Connect your AI</b>\n" +
+                "Type one of these to set your key:\n" +
+                "• <code>openai sk-...</code>\n" +
+                "• <code>anthropic sk-ant-...</code>\n" +
+                "• <code>gemini AIza...</code>\n" +
+                "• <code>qwen sk-...</code>\n\n" +
+                "🐦 <a href=\"https://x.com/ArcPayAgent\">x.com/ArcPayAgent</a>",
+                { parse_mode: "HTML", disable_web_page_preview: true } as any
             );
             return;
         }
 
         if (msg.text === "/help") {
             await deps.sender.send(chatId,
-                "ArcPay — What can I do?\n" +
-                "━━━━━━━━━━━━━━━━━━━━\n\n" +
-                "Payments\n" +
-                "  send 5 USDC to alice\n" +
-                "  send 10 EURC to 0x...\n" +
-                "  request 20 USDC from someone\n\n" +
-                "Vendors\n" +
-                "  save alice 0x... as vendor\n" +
-                "  list my vendors\n" +
-                "  remove vendor alice\n\n" +
-                "Schedules\n" +
-                "  schedule 10 USDC to alice every week\n" +
-                "  list my schedules\n" +
-                "  cancel schedule <id>\n\n" +
-                "Wallet\n" +
-                "  create wallet\n" +
-                "  show wallet\n" +
-                "  wallet analysis\n\n" +
-                "Analytics\n" +
-                "  report / account summary\n" +
-                "  recent payments\n" +
-                "  monthly spending\n\n" +
-                "Research\n" +
-                "  BTC price\n" +
-                "  1000 EUR in USD\n\n" +
-                "Alerts\n" +
-                "  watch my wallet\n" +
-                "  alert me when BTC hits $100k\n" +
-                "  list my alerts\n\n" +
-                "AI Settings\n" +
-                "  openai <key>         → set key\n" +
-                "  what model am I using\n" +
-                "  change model to gpt-4o\n" +
-                "  change provider to anthropic\n" +
-                "  remove my ai key\n" +
-                "  reset conversation\n\n" +
-                "Other\n" +
-                "  faucet               → testnet USDC link"
+                "<b>ArcPay — Command Reference</b>\n\n" +
+                "<b>💸 Payments</b>\n" +
+                "• <code>send 5 USDC to alice</code>\n" +
+                "• <code>send 10 EURC to 0x1234...</code>\n" +
+                "• <code>request 20 USDC</code> — create a payment link\n\n" +
+                "<b>📋 Vendors</b>\n" +
+                "• <code>save alice 0x... as vendor</code>\n" +
+                "• <code>list my vendors</code>\n" +
+                "• <code>remove vendor alice</code>\n\n" +
+                "<b>🔄 Schedules</b>\n" +
+                "• <code>schedule 10 USDC to alice every week</code>\n" +
+                "• <code>list my schedules</code>\n" +
+                "• <code>cancel schedule &lt;id&gt;</code>\n\n" +
+                "<b>👛 Wallet</b>\n" +
+                "• <code>create wallet</code>\n" +
+                "• <code>show wallet</code>\n" +
+                "• <code>wallet analysis</code>\n\n" +
+                "<b>📊 Analytics</b>\n" +
+                "• <code>report</code> / <code>account summary</code>\n" +
+                "• <code>recent payments</code>\n" +
+                "• <code>monthly spending</code>\n\n" +
+                "<b>🔍 Research</b>\n" +
+                "• <code>BTC price</code>\n" +
+                "• <code>1000 EUR in USD</code>\n\n" +
+                "<b>🔔 Alerts</b>\n" +
+                "• <code>watch my wallet</code>\n" +
+                "• <code>alert me when BTC hits $100k</code>\n" +
+                "• <code>list my alerts</code>\n\n" +
+                "<b>🤖 AI Settings</b>\n" +
+                "• <code>openai sk-...</code> — set API key\n" +
+                "• <code>/model gpt-4o</code> — change model\n" +
+                "• <code>/provider anthropic</code> — change provider\n" +
+                "• <code>/aiconfig</code> — show current config\n" +
+                "• <code>/removekey</code> — delete API key\n" +
+                "• <code>/reset</code> — clear conversation\n\n" +
+                "<b>🚰 Other</b>\n" +
+                "• <code>faucet</code> — testnet USDC link",
+                { parse_mode: "HTML" } as any
             );
             return;
         }
@@ -106,6 +108,50 @@ export function attachMessageHandlers(bot: TelegramBot, deps: BotDeps): void {
         if (msg.text === "/reset") {
             deps.memory.reset(chatId);
             await deps.sender.send(chatId, "Conversation reset.");
+            return;
+        }
+
+        // /model <name> — set LLM model directly, no LLM call needed
+        if (msg.text?.startsWith("/model ")) {
+            const model = msg.text.slice(7).trim();
+            if (model) {
+                const ok = await deps.keys.setModel(chatId, model);
+                if (ok) await deps.sender.send(chatId, `Model changed to: ${model}`);
+                else await deps.sender.send(chatId, "No LLM key configured. Set one first (e.g. openai <key>).");
+            }
+            return;
+        }
+
+        // /provider <name> — set LLM provider directly
+        if (msg.text?.startsWith("/provider ")) {
+            const provider = msg.text.slice(10).trim().toLowerCase();
+            const valid = VALID_PROVIDERS.includes(provider);
+            if (!valid) {
+                await deps.sender.send(chatId, `Unknown provider. Valid: ${VALID_PROVIDERS.join(", ")}`);
+            } else {
+                const ok = await deps.keys.setProvider(chatId, provider);
+                const models = DEFAULT_MODELS[provider] || [];
+                if (ok) await deps.sender.send(chatId, `Provider changed to: ${provider}${models.length ? "\nModels: " + models.slice(0, 3).join(", ") : ""}`);
+                else await deps.sender.send(chatId, "No LLM key configured. Set one first.");
+            }
+            return;
+        }
+
+        // /aiconfig — show current AI config
+        if (msg.text === "/aiconfig") {
+            const info = await deps.keys.getInfo(chatId);
+            if (!info) { await deps.sender.send(chatId, "No LLM key configured."); return; }
+            const models = DEFAULT_MODELS[info.provider] || [];
+            let text = `AI Configuration\n\nProvider: ${info.provider}\nModel: ${info.model || "(default)"}\nKey: configured`;
+            if (models.length) text += `\n\nAvailable models:\n${models.map(m => `  ${m}`).join("\n")}`;
+            await deps.sender.send(chatId, text);
+            return;
+        }
+
+        // /removekey — remove LLM key
+        if (msg.text === "/removekey") {
+            await deps.keys.removeKey(chatId);
+            await deps.sender.send(chatId, "LLM API key removed.");
             return;
         }
 

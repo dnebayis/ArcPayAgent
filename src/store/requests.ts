@@ -1,5 +1,5 @@
 import { nanoid } from "nanoid";
-import { Store } from "./base";
+import { DB } from "./db";
 
 export interface PaymentRequest {
     id: string;
@@ -11,36 +11,40 @@ export interface PaymentRequest {
     createdAt: number;
 }
 
-const NS = "requests";
-
 export class PaymentRequestStore {
-    /**
-     * Namespace : requests
-     * Key pattern: {requestId}
-     * Value type : PaymentRequest
-     */
-    constructor(private store: Store) {}
+    constructor(private db: DB) {}
 
     async create(chatId: number, recipientAddress: string, amount: number, token: "USDC" | "EURC" = "USDC"): Promise<PaymentRequest> {
-        const req: PaymentRequest = {
-            id: nanoid(12),
-            chatId,
-            recipientAddress,
-            amount,
-            token,
-            paid: false,
-            createdAt: Date.now(),
-        };
-        await this.store.set(NS, req.id, req);
-        return req;
+        const id = nanoid(12);
+        const now = Date.now();
+        await this.db.run(
+            `INSERT INTO payment_requests (id,chat_id,recipient_address,amount,token,paid,created_at)
+             VALUES ($1,$2,$3,$4,$5,0,$6)`,
+            [id, chatId, recipientAddress, amount, token, now]
+        );
+        return { id, chatId, recipientAddress, amount, token, paid: false, createdAt: now };
     }
 
     async get(requestId: string): Promise<PaymentRequest | null> {
-        return this.store.get<PaymentRequest>(NS, requestId);
+        const row = await this.db.queryOne<any>(
+            "SELECT * FROM payment_requests WHERE id=$1", [requestId]
+        );
+        return row ? rowToRequest(row) : null;
     }
 
     async markPaid(requestId: string): Promise<void> {
-        const req = await this.get(requestId);
-        if (req) { req.paid = true; await this.store.set(NS, requestId, req); }
+        await this.db.run("UPDATE payment_requests SET paid=1 WHERE id=$1", [requestId]);
     }
+}
+
+function rowToRequest(row: any): PaymentRequest {
+    return {
+        id: row.id,
+        chatId: Number(row.chat_id),
+        recipientAddress: row.recipient_address,
+        amount: Number(row.amount),
+        token: row.token as "USDC" | "EURC",
+        paid: !!row.paid,
+        createdAt: Number(row.created_at),
+    };
 }
