@@ -9,7 +9,14 @@ import { logger } from "../utils/logger";
  *   1. PostgreSQL  — when DATABASE_URL is set
  *   2. SQLite      — default (data/arcpay.sqlite), single file, atomic writes
  *
- * The in-memory cache prevents redundant reads within the same process lifetime.
+ * Schema:  kv(namespace TEXT, key TEXT, value JSONB, PRIMARY KEY(namespace, key))
+ *
+ * Key conventions:
+ *   - Single record per entity : "{chatId}"          e.g. wallets | 123456
+ *   - One per entity per user  : "{chatId}:{id}"     e.g. schedules | 123456:abc10
+ *   - Global singleton         : "global"            e.g. identity | global
+ *
+ * In-memory cache: prevents redundant reads within the same process lifetime.
  * On restart the cache is rebuilt from the persistent backend.
  */
 export class Store {
@@ -48,7 +55,6 @@ export class Store {
                     PRIMARY KEY (namespace, key)
                 )
             `);
-            // WAL mode: faster writes, safe on crash
             this.sqlite.pragma("journal_mode = WAL");
             logger.info(null, "[Store] SQLite initialized", { path: dbPath });
         }
@@ -71,8 +77,23 @@ export class Store {
         this.persistDelete(namespace, key);
     }
 
+    /** Returns all records in a namespace. */
     async getAll<T>(namespace: string): Promise<Record<string, T>> {
         return (await this.loadNamespace(namespace)) as Record<string, T>;
+    }
+
+    /**
+     * Returns all records whose key starts with `prefix`.
+     * Used for compound-key namespaces: getByPrefix("schedules", "123456:")
+     * returns all schedules for chatId 123456.
+     */
+    async getByPrefix<T>(namespace: string, prefix: string): Promise<Record<string, T>> {
+        const all = await this.loadNamespace(namespace);
+        const result: Record<string, T> = {};
+        for (const [k, v] of Object.entries(all)) {
+            if (k.startsWith(prefix)) result[k] = v as T;
+        }
+        return result;
     }
 
     private async loadNamespace(namespace: string): Promise<Record<string, any>> {
@@ -99,7 +120,6 @@ export class Store {
         return data;
     }
 
-    /** Upsert a single row — synchronous for SQLite, async for PostgreSQL. */
     private persist(namespace: string, key: string, value: any): void {
         const json = JSON.stringify(value);
 

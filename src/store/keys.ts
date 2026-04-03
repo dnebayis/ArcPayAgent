@@ -8,9 +8,14 @@ interface LLMKeyData {
     model?: string;
 }
 
-const NS = "llm_keys";
+const NS = "keys";
 
 export class LLMKeyStore {
+    /**
+     * Namespace : keys
+     * Key pattern: {chatId}
+     * Value type : LLMKeyData
+     */
     constructor(private store: Store, private secret: string) {}
 
     async getKey(chatId: number): Promise<{ provider: string; key: string; model?: string } | null> {

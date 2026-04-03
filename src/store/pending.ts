@@ -20,9 +20,14 @@ export interface PendingPayment {
     source?: PaymentSource;
 }
 
-const NS = "pending_payments";
+const NS = "pending";
 
 export class PendingPaymentStore {
+    /**
+     * Namespace : pending
+     * Key pattern: {chatId}
+     * Value type : PendingPayment
+     */
     constructor(private store: Store) {}
 
     async get(chatId: number): Promise<PendingPayment | null> {

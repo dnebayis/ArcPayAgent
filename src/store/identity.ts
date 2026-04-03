@@ -16,10 +16,15 @@ export interface AgentIdentity {
     lastSyncedAt?: number;
 }
 
-const NS = "agent_identity";
+const NS = "identity";
 const KEY = "global";
 
 export class AgentIdentityStore {
+    /**
+     * Namespace : identity
+     * Key pattern: "global"  (singleton)
+     * Value type : AgentIdentity
+     */
     constructor(private store: Store) {}
 
     async get(): Promise<AgentIdentity | null> {

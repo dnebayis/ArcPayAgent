@@ -10,30 +10,36 @@ export interface VendorData {
 
 const NS = "vendors";
 
+/** Compound row key: "{chatId}:{vendorName}" */
+const rowKey = (chatId: number, name: string) => `${chatId}:${name}`;
+
 export class VendorStore {
+    /**
+     * Namespace : vendors
+     * Key pattern: {chatId}:{vendorName}  (vendorName is lowercased)
+     * Value type : VendorData
+     */
     constructor(private store: Store) {}
 
     async saveVendor(chatId: number, name: string, address: string): Promise<void> {
-        const all = await this.getAll(chatId);
         const key = name.toLowerCase();
-        const existing = all[key];
-        all[key] = {
+        const existing = await this.store.get<VendorData>(NS, rowKey(chatId, key));
+        const vendor: VendorData = {
             address,
             displayName: name,
             totalPaid: existing?.totalPaid ?? 0,
             paymentCount: existing?.paymentCount ?? 0,
             lastPayment: existing?.lastPayment,
         };
-        await this.store.set(NS, String(chatId), all);
+        await this.store.set(NS, rowKey(chatId, key), vendor);
     }
 
     async getVendor(chatId: number, name: string): Promise<VendorData | null> {
-        const all = await this.getAll(chatId);
-        return all[name.toLowerCase()] ?? null;
+        return this.store.get<VendorData>(NS, rowKey(chatId, name.toLowerCase()));
     }
 
     async findVendor(chatId: number, query: string): Promise<{ name: string; data: VendorData } | null> {
-        const all = await this.getAll(chatId);
+        const all = await this.listVendors(chatId);
         const q = query.toLowerCase();
 
         // Exact match first
@@ -51,46 +57,48 @@ export class VendorStore {
     }
 
     async listVendors(chatId: number): Promise<Record<string, VendorData>> {
-        return this.getAll(chatId);
+        const prefix = `${chatId}:`;
+        const raw = await this.store.getByPrefix<VendorData>(NS, prefix);
+        const result: Record<string, VendorData> = {};
+        for (const [k, v] of Object.entries(raw)) {
+            result[k.slice(prefix.length)] = v;
+        }
+        return result;
     }
 
     async removeVendor(chatId: number, name: string): Promise<boolean> {
-        const all = await this.getAll(chatId);
         const key = name.toLowerCase();
-        if (!all[key]) return false;
-        delete all[key];
-        await this.store.set(NS, String(chatId), all);
+        const existing = await this.store.get<VendorData>(NS, rowKey(chatId, key));
+        if (!existing) return false;
+        await this.store.delete(NS, rowKey(chatId, key));
         return true;
     }
 
     async removeAll(chatId: number): Promise<number> {
-        const all = await this.getAll(chatId);
+        const all = await this.listVendors(chatId);
         const count = Object.keys(all).length;
-        await this.store.set(NS, String(chatId), {});
+        for (const name of Object.keys(all)) {
+            await this.store.delete(NS, rowKey(chatId, name));
+        }
         return count;
     }
 
     async recordPayment(chatId: number, name: string, amount: number): Promise<void> {
-        const all = await this.getAll(chatId);
         const key = name.toLowerCase();
-        const v = all[key];
+        const v = await this.store.get<VendorData>(NS, rowKey(chatId, key));
         if (!v) return;
         v.totalPaid = (v.totalPaid || 0) + amount;
         v.paymentCount = (v.paymentCount || 0) + 1;
         v.lastPayment = Date.now();
-        await this.store.set(NS, String(chatId), all);
+        await this.store.set(NS, rowKey(chatId, key), v);
     }
 
     async getTopVendors(chatId: number, limit = 5): Promise<Array<{ name: string; data: VendorData }>> {
-        const all = await this.getAll(chatId);
+        const all = await this.listVendors(chatId);
         return Object.entries(all)
             .map(([name, data]) => ({ name, data }))
             .sort((a, b) => (b.data.totalPaid || 0) - (a.data.totalPaid || 0))
             .slice(0, limit);
-    }
-
-    private async getAll(chatId: number): Promise<Record<string, VendorData>> {
-        return (await this.store.get<Record<string, VendorData>>(NS, String(chatId))) ?? {};
     }
 }
 

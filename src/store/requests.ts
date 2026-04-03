@@ -11,9 +11,14 @@ export interface PaymentRequest {
     createdAt: number;
 }
 
-const NS = "payment_requests";
+const NS = "requests";
 
 export class PaymentRequestStore {
+    /**
+     * Namespace : requests
+     * Key pattern: {requestId}
+     * Value type : PaymentRequest
+     */
     constructor(private store: Store) {}
 
     async create(chatId: number, recipientAddress: string, amount: number, token: "USDC" | "EURC" = "USDC"): Promise<PaymentRequest> {

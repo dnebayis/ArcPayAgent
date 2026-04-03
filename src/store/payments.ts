@@ -1,6 +1,8 @@
+import { nanoid } from "nanoid";
 import { Store } from "./base";
 
 export interface PaymentLog {
+    id: string;
     vendor: string;
     address: string;
     amount: number;
@@ -10,15 +12,23 @@ export interface PaymentLog {
     txHash?: string;
 }
 
-const NS = "payment_logs";
+const NS = "payments";
+
+/** Compound row key: "{chatId}:{id}" */
+const rowKey = (chatId: number, id: string) => `${chatId}:${id}`;
 
 export class PaymentLogStore {
+    /**
+     * Namespace : payments
+     * Key pattern: {chatId}:{id}
+     * Value type : PaymentLog
+     */
     constructor(private store: Store) {}
 
-    async logPayment(chatId: number, entry: PaymentLog): Promise<void> {
-        const logs = await this.getAll(chatId);
-        logs.push(entry);
-        await this.store.set(NS, String(chatId), logs);
+    async logPayment(chatId: number, entry: Omit<PaymentLog, "id"> & { id?: string }): Promise<void> {
+        const id = entry.id ?? nanoid(10);
+        const log: PaymentLog = { id, ...entry };
+        await this.store.set(NS, rowKey(chatId, id), log);
     }
 
     async getPayments(chatId: number): Promise<PaymentLog[]> {
@@ -36,6 +46,8 @@ export class PaymentLogStore {
     }
 
     private async getAll(chatId: number): Promise<PaymentLog[]> {
-        return (await this.store.get<PaymentLog[]>(NS, String(chatId))) ?? [];
+        const prefix = `${chatId}:`;
+        const raw = await this.store.getByPrefix<PaymentLog>(NS, prefix);
+        return Object.values(raw).sort((a, b) => a.timestamp - b.timestamp);
     }
 }

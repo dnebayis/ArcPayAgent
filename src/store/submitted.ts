@@ -17,9 +17,14 @@ export interface SubmittedTx {
     submittedAt: number;
 }
 
-const NS = "submitted_txs";
+const NS = "submitted";
 
 export class SubmittedTxStore {
+    /**
+     * Namespace : submitted
+     * Key pattern: {chatId}
+     * Value type : SubmittedTx
+     */
     constructor(private store: Store) {}
 
     async get(chatId: number): Promise<SubmittedTx | null> {

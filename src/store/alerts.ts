@@ -14,7 +14,15 @@ export interface PriceAlert {
 
 const NS = "alerts";
 
+/** Compound row key: "{chatId}:{alertId}" */
+const rowKey = (chatId: number, alertId: string) => `${chatId}:${alertId}`;
+
 export class AlertStore {
+    /**
+     * Namespace : alerts
+     * Key pattern: {chatId}:{alertId}
+     * Value type : PriceAlert
+     */
     constructor(private store: Store) {}
 
     async createAlert(
@@ -41,8 +49,7 @@ export class AlertStore {
             triggered: false,
             createdAt: Date.now(),
         };
-        all.push(alert);
-        await this.store.set(NS, String(chatId), all);
+        await this.store.set(NS, rowKey(chatId, alert.id), alert);
         return alert;
     }
 
@@ -52,41 +59,45 @@ export class AlertStore {
     }
 
     async getAllActiveAlerts(): Promise<Array<{ chatId: number; alert: PriceAlert }>> {
-        const allNs = await this.store.getAll<PriceAlert[]>(NS);
+        const allNs = await this.store.getAll<PriceAlert>(NS);
         const result: Array<{ chatId: number; alert: PriceAlert }> = [];
-        for (const [chatIdStr, alerts] of Object.entries(allNs)) {
-            for (const a of alerts) {
-                if (a.active && !a.triggered) {
-                    result.push({ chatId: parseInt(chatIdStr, 10), alert: a });
-                }
+        for (const [key, alert] of Object.entries(allNs)) {
+            if (alert.active && !alert.triggered) {
+                const chatId = parseInt(key.split(":")[0], 10);
+                result.push({ chatId, alert });
             }
         }
         return result;
     }
 
     async markTriggered(chatId: number, alertId: string): Promise<void> {
-        const all = await this.getAll(chatId);
-        const a = all.find(x => x.id === alertId);
-        if (a) { a.triggered = true; a.triggeredAt = Date.now(); await this.store.set(NS, String(chatId), all); }
+        const a = await this.store.get<PriceAlert>(NS, rowKey(chatId, alertId));
+        if (a) {
+            a.triggered = true;
+            a.triggeredAt = Date.now();
+            await this.store.set(NS, rowKey(chatId, alertId), a);
+        }
     }
 
     async removeAlert(chatId: number, alertId: string): Promise<boolean> {
-        const all = await this.getAll(chatId);
-        const idx = all.findIndex(x => x.id === alertId);
-        if (idx < 0) return false;
-        all.splice(idx, 1);
-        await this.store.set(NS, String(chatId), all);
+        const existing = await this.store.get<PriceAlert>(NS, rowKey(chatId, alertId));
+        if (!existing) return false;
+        await this.store.delete(NS, rowKey(chatId, alertId));
         return true;
     }
 
     async removeAllAlerts(chatId: number): Promise<number> {
         const all = await this.getAll(chatId);
         const count = all.length;
-        await this.store.set(NS, String(chatId), []);
+        for (const a of all) {
+            await this.store.delete(NS, rowKey(chatId, a.id));
+        }
         return count;
     }
 
     private async getAll(chatId: number): Promise<PriceAlert[]> {
-        return (await this.store.get<PriceAlert[]>(NS, String(chatId))) ?? [];
+        const prefix = `${chatId}:`;
+        const raw = await this.store.getByPrefix<PriceAlert>(NS, prefix);
+        return Object.values(raw);
     }
 }

@@ -17,7 +17,15 @@ export interface Schedule {
 
 const NS = "schedules";
 
+/** Compound row key: "{chatId}:{scheduleId}" */
+const rowKey = (chatId: number, scheduleId: string) => `${chatId}:${scheduleId}`;
+
 export class ScheduleStore {
+    /**
+     * Namespace : schedules
+     * Key pattern: {chatId}:{scheduleId}
+     * Value type : Schedule
+     */
     constructor(private store: Store) {}
 
     async createSchedule(
@@ -31,9 +39,7 @@ export class ScheduleStore {
             createdAt: Date.now(),
             awaitingAction: false,
         };
-        const all = await this.getAll(chatId);
-        all.push(schedule);
-        await this.store.set(NS, String(chatId), all);
+        await this.store.set(NS, rowKey(chatId, schedule.id), schedule);
         return schedule;
     }
 
@@ -43,34 +49,33 @@ export class ScheduleStore {
     }
 
     async getSchedule(chatId: number, scheduleId: string): Promise<Schedule | null> {
-        const all = await this.getAll(chatId);
-        return all.find(s => s.id === scheduleId) ?? null;
+        return this.store.get<Schedule>(NS, rowKey(chatId, scheduleId));
     }
 
     async getDueSchedules(): Promise<Array<{ chatId: number; schedule: Schedule }>> {
-        const allNs = await this.store.getAll<Schedule[]>(NS);
+        const allNs = await this.store.getAll<Schedule>(NS);
         const now = Date.now();
         const due: Array<{ chatId: number; schedule: Schedule }> = [];
 
-        for (const [chatIdStr, schedules] of Object.entries(allNs)) {
-            for (const s of schedules) {
-                if (s.active && !s.awaitingAction && s.nextExecution <= now) {
-                    due.push({ chatId: parseInt(chatIdStr, 10), schedule: s });
-                }
+        for (const [key, schedule] of Object.entries(allNs)) {
+            const chatId = parseInt(key.split(":")[0], 10);
+            if (schedule.active && !schedule.awaitingAction && schedule.nextExecution <= now) {
+                due.push({ chatId, schedule });
             }
         }
         return due;
     }
 
     async markNotified(chatId: number, scheduleId: string): Promise<void> {
-        const all = await this.getAll(chatId);
-        const s = all.find(x => x.id === scheduleId);
-        if (s) { s.awaitingAction = true; await this.store.set(NS, String(chatId), all); }
+        const s = await this.store.get<Schedule>(NS, rowKey(chatId, scheduleId));
+        if (s) {
+            s.awaitingAction = true;
+            await this.store.set(NS, rowKey(chatId, scheduleId), s);
+        }
     }
 
     async markExecuted(chatId: number, scheduleId: string): Promise<void> {
-        const all = await this.getAll(chatId);
-        const s = all.find(x => x.id === scheduleId);
+        const s = await this.store.get<Schedule>(NS, rowKey(chatId, scheduleId));
         if (!s) return;
 
         s.awaitingAction = false;
@@ -80,27 +85,33 @@ export class ScheduleStore {
         } else {
             s.active = false;
         }
-        await this.store.set(NS, String(chatId), all);
+        await this.store.set(NS, rowKey(chatId, scheduleId), s);
     }
 
     async cancelSchedule(chatId: number, scheduleId: string): Promise<boolean> {
-        const all = await this.getAll(chatId);
-        const s = all.find(x => x.id === scheduleId && x.active);
-        if (!s) return false;
+        const s = await this.store.get<Schedule>(NS, rowKey(chatId, scheduleId));
+        if (!s || !s.active) return false;
         s.active = false;
-        await this.store.set(NS, String(chatId), all);
+        await this.store.set(NS, rowKey(chatId, scheduleId), s);
         return true;
     }
 
     async cancelAllSchedules(chatId: number): Promise<number> {
         const all = await this.getAll(chatId);
         let count = 0;
-        for (const s of all) { if (s.active) { s.active = false; count++; } }
-        await this.store.set(NS, String(chatId), all);
+        for (const s of all) {
+            if (s.active) {
+                s.active = false;
+                count++;
+                await this.store.set(NS, rowKey(chatId, s.id), s);
+            }
+        }
         return count;
     }
 
     private async getAll(chatId: number): Promise<Schedule[]> {
-        return (await this.store.get<Schedule[]>(NS, String(chatId))) ?? [];
+        const prefix = `${chatId}:`;
+        const raw = await this.store.getByPrefix<Schedule>(NS, prefix);
+        return Object.values(raw);
     }
 }
