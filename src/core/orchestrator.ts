@@ -62,6 +62,8 @@ export class Orchestrator {
     }
 
     async handleMessage(chatId: number, text: string): Promise<void> {
+        // Load persisted context on first message after restart (no-op if already loaded)
+        await this.memory.load(chatId);
         this.memory.addUserMessage(chatId, text);
 
         // Rule 1 & 2: If awaiting confirmation, intercept confirm/cancel text

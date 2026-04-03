@@ -53,7 +53,7 @@ EURC_ADDRESS=0x89B50855Aa3bE2F677cD6303Cec089B5F319D72a
 ARC_GAS_RESERVE_USDC=0.10
 CIRCLE_API_URL=https://api.circle.com/v1/w3s
 PORT=3000
-DATABASE_URL=                   # PostgreSQL (leave blank for SQLite)
+DATABASE_URL=                   # PostgreSQL connection string (leave blank for SQLite)
 ALLOWED_CHAT_IDS=               # comma-separated Telegram chat IDs, blank = allow all
 WEBHOOK_URL=                    # set to enable webhook instead of polling
 MAX_AGENT_ITERATIONS=4
@@ -81,12 +81,12 @@ ERC8004_VALIDATION_REGISTRY=0x8004Cb1BF31DAf7788923b405b754f57acEB4272
 Single file at `data/arcpay.sqlite`. Uses WAL mode for crash safety and fast writes.
 
 **In containers:** mount a persistent volume at `/app/data` so the file survives restarts.
-Without a volume, all user data (LLM keys, wallets, vendors, schedules) is lost on every restart.
+Without a volume, all user data is lost on every restart.
 
 ### PostgreSQL
 
-Set `DATABASE_URL=postgres://...` — the `kv` table is created automatically on first boot.
-SSL is auto-enabled for non-localhost connections (Northflank, Railway, Render, etc.).
+Set `DATABASE_URL=postgres://...` — all tables are created automatically on first boot.
+SSL is auto-enabled for non-localhost connections (Northflank, Railway, Render, Neon, etc.).
 
 ### Which to use?
 
@@ -95,6 +95,54 @@ SSL is auto-enabled for non-localhost connections (Northflank, Railway, Render, 
 | Single instance, persistent volume available | SQLite (default) |
 | Multiple instances / high availability | PostgreSQL |
 | Quick local dev | SQLite (default, no config needed) |
+| Northflank with addon or Neon | PostgreSQL (`DATABASE_URL`) |
+
+### Database Schema
+
+13 typed tables — all created automatically:
+
+| Table | Description |
+|-------|-------------|
+| `wallets` | Circle wallet per user |
+| `vendors` | Address book with payment stats |
+| `payments` | Payment history |
+| `schedules` | Recurring payment schedules |
+| `price_alerts` | Price alert rules |
+| `watch_config` | Wallet balance monitoring |
+| `pending_payments` | Awaiting user confirmation |
+| `submitted_txs` | In-flight Circle transactions |
+| `invoice_sessions` | Active invoice analysis |
+| `payment_requests` | Shareable payment links |
+| `llm_keys` | Encrypted LLM API keys |
+| `agent_identity` | ERC-8004 on-chain identity |
+| `conversations` | Last 20 messages per user (survives restarts) |
+
+**Migration:** If a legacy `kv` table exists from a previous version, it is automatically migrated on first boot and renamed to `kv_migrated`.
+
+## LLM Configuration
+
+Users set their own AI keys via Telegram. Supported providers:
+
+| Provider | Setup |
+|----------|-------|
+| OpenAI | `openai sk-...` |
+| Anthropic | `anthropic sk-ant-...` |
+| Gemini | `gemini AIza...` |
+| Qwen | `qwen sk-...` |
+| Groq | `groq gsk_...` |
+| DeepSeek | `deepseek sk-...` |
+
+Keys are encrypted at rest using `LLM_KEY_SECRET` (AES-256-GCM).
+
+**Slash commands for AI config:**
+
+| Command | Action |
+|---------|--------|
+| `/model gpt-4o` | Change model |
+| `/provider anthropic` | Change provider |
+| `/aiconfig` | Show current config |
+| `/removekey` | Delete API key |
+| `/reset` | Clear conversation history |
 
 ## Health Check
 
@@ -116,31 +164,35 @@ Health path:     /health
 ```
 
 **Persistence (required — choose one):**
-- Option A: Attach a persistent volume at `/app/data` — uses SQLite automatically
-- Option B: Add a PostgreSQL addon → set `DATABASE_URL` env var
+- **Option A:** Attach a persistent volume at `/app/data` — uses SQLite automatically
+- **Option B:** Add a PostgreSQL addon → set `DATABASE_URL` env var (recommended for production)
 
-Without one of these, user LLM keys and wallet data are wiped on every restart.
+To get the connection string from a Northflank PostgreSQL addon:
+1. Go to your addon → **Connection** tab
+2. Copy the **Connection URI** (starts with `postgres://`)
+3. Set it as `DATABASE_URL` in your service's environment variables
 
 Add secrets: `TELEGRAM_TOKEN`, `CIRCLE_API_KEY`, `CIRCLE_ENTITY_SECRET`, `LLM_KEY_SECRET`
 
 ## Startup Sequence
 
 1. Load and validate config (Zod schema — fails fast on invalid env)
-2. Initialize persistence store (SQLite or PostgreSQL)
+2. Initialize DB (SQLite or PostgreSQL), create tables, run migration if needed
 3. Create ethers provider, Circle client, chain clients
-4. Create all stores (13 stores)
-5. Create engines (payment, invoice, analytics, requests, identity)
-6. Register all actions into the action registry (8 action groups)
-7. Attach Telegram handlers (polling or webhook)
-8. Reconcile in-flight Circle transactions
-9. Initialize ERC-8004 agent identity (if configured)
-10. Start Scheduler (10s), Watcher (30s), Alerter (60s) services
-11. Start health HTTP server
-12. Log "ArcPay Agent ready"
+4. Create all stores (12 stores backed by typed SQL tables)
+5. Create conversation memory (loads last 20 messages per user from DB)
+6. Create engines (payment, invoice, analytics, requests, identity)
+7. Register all actions into the action registry (8 action groups)
+8. Attach Telegram handlers (polling or webhook)
+9. Reconcile in-flight Circle transactions
+10. Initialize ERC-8004 agent identity (if configured)
+11. Start Scheduler (10s), Watcher (30s), Alerter (60s) services
+12. Start health HTTP server
+13. Log "ArcPay Agent ready"
 
 ## Graceful Shutdown
 
-`SIGINT` or `SIGTERM` → stops scheduler/watcher/alerter → stops Telegram polling → exits cleanly.
+`SIGINT` or `SIGTERM` → stops scheduler/watcher/alerter → stops Telegram polling → closes DB → exits cleanly.
 
 ## Arc Testnet Notes
 
@@ -154,13 +206,14 @@ Add secrets: `TELEGRAM_TOKEN`, `CIRCLE_API_KEY`, `CIRCLE_ENTITY_SECRET`, `LLM_KE
 1. Set all required env vars
 2. Confirm `CIRCLE_ENTITY_SECRET` is exactly 64 hex chars
 3. Confirm `PAYABLES_ROUTER_ADDRESS` is a valid `0x` address
-4. Deploy and verify `GET /health` returns 200
-5. In Telegram: type `create wallet`
-6. Fund wallet: type `faucet` to get the testnet USDC link
-7. Set LLM key: type `openai <your-key>` (or anthropic / gemini / qwen)
-8. Test: `send 0.01 usdc to 0x<test_address>`
-9. Verify payment card shows `[Confirm]` and `[Cancel]` buttons
-10. Confirm payment, verify tx appears on arcscan
+4. Set `DATABASE_URL` (Northflank addon or Neon connection URI)
+5. Deploy and verify `GET /health` returns 200
+6. In Telegram: `create wallet`
+7. Fund wallet: `faucet` → get testnet USDC link
+8. Set LLM key: `openai <your-key>` (or anthropic / gemini / qwen)
+9. Test: `send 0.01 usdc to 0x<test_address>`
+10. Verify payment card shows `[Confirm]` and `[Cancel]` buttons
+11. Confirm payment, verify tx appears on arcscan
 
 ## Rollback
 

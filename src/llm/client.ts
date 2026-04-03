@@ -29,9 +29,22 @@ export async function requestToolCompletion(
     const start = Date.now();
     const p = auth.provider.toLowerCase();
 
-    if (p === "anthropic") return callAnthropicTools(auth, messages, start);
-    if (p === "gemini") return callGeminiTools(auth, messages, start);
-    return callOpenAITools(auth, messages, start);
+    try {
+        if (p === "anthropic") return await callAnthropicTools(auth, messages, start);
+        if (p === "gemini") return await callGeminiTools(auth, messages, start);
+        return await callOpenAITools(auth, messages, start);
+    } catch (err: any) {
+        // 404 = model not found → retry once with provider's default model
+        if (err.message?.includes("404") && auth.model) {
+            const fallback = defaultModel(p);
+            logger.warn(null, "[LLM] Model not found, falling back", { model: auth.model, fallback, provider: p });
+            const fallbackAuth = { ...auth, model: fallback };
+            if (p === "anthropic") return callAnthropicTools(fallbackAuth, messages, start);
+            if (p === "gemini") return callGeminiTools(fallbackAuth, messages, start);
+            return callOpenAITools(fallbackAuth, messages, start);
+        }
+        throw err;
+    }
 }
 
 // ---- JSON completion (for research synthesis) ----

@@ -15,7 +15,7 @@ import { logger } from "../utils/logger";
  * Tables:
  *   wallets, vendors, payments, schedules, price_alerts,
  *   watch_config, pending_payments, submitted_txs, invoice_sessions,
- *   payment_requests, llm_keys, agent_identity
+ *   payment_requests, llm_keys, agent_identity, conversations
  */
 export class DB {
     private pgPool: any = null;
@@ -206,6 +206,12 @@ export class DB {
                 validation_request_hash  TEXT,
                 validation_status        TEXT,
                 last_synced_at           BIGINT
+            )`,
+            `CREATE TABLE IF NOT EXISTS conversations (
+                chat_id    BIGINT PRIMARY KEY,
+                messages   TEXT NOT NULL DEFAULT '[]',
+                context    TEXT NOT NULL DEFAULT '{}',
+                updated_at BIGINT NOT NULL
             )`,
         ];
 

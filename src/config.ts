@@ -7,6 +7,7 @@ const ethAddr = z.string().regex(/^0x[a-fA-F0-9]{40}$/, "Must be valid Ethereum 
 const schema = z.object({
     // Telegram
     TELEGRAM_TOKEN: z.string().min(1),
+    TELEGRAM_BOT_USERNAME: z.string().optional(), // e.g. "ArcPayAgentBot"
     TELEGRAM_WEBHOOK_SECRET: z.string().optional(),
     ALLOWED_CHAT_IDS: z.string().optional(),
 

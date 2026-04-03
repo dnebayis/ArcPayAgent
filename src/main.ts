@@ -90,7 +90,7 @@ async function main(): Promise<void> {
     const identityStore = new AgentIdentityStore(db);
 
     // ─── Memory ───
-    const memory = new ConversationMemory();
+    const memory = new ConversationMemory(db);
 
     // ─── Bot instance ───
     const TelegramBot = (await import("node-telegram-bot-api")).default;
@@ -116,6 +116,7 @@ async function main(): Promise<void> {
     });
     const requestEngine = new RequestEngine({
         requests, wallets, send, sendCard,
+        botUsername: config.TELEGRAM_BOT_USERNAME || "ArcPayAgentBot",
     });
     const identityEngine = new IdentityEngine({
         circle, erc8004, identityStore, wallets, send,
