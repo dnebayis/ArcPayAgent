@@ -25,6 +25,7 @@ export const TERMINAL_ACTIONS = new Set([
     "get_crypto_prices", "get_fx_rate", "get_arc_network_stats", "get_my_arc_activity",
     "agent_status", "agent_identity", "agent_validation_status",
     "create_payment_request", "analyze_invoice",
+    "set_model", "set_provider", "show_ai_config", "remove_ai_key", "reset_conversation",
 ]);
 
 export const TOOL_DEFINITIONS: ToolDef[] = [
@@ -284,6 +285,39 @@ export const TOOL_DEFINITIONS: ToolDef[] = [
     {
         name: "agent_validation_status",
         description: "Check the KYC validation status for the agent.",
+        parameters: { type: "object", properties: {}, required: [] },
+    },
+    {
+        name: "set_model",
+        description: "Change the LLM model. Triggered by 'change model to X', 'use model X', 'switch to gpt-4o'.",
+        parameters: {
+            type: "object",
+            properties: { model: { type: "string", description: "Model name, e.g. gpt-4.1-mini" } },
+            required: ["model"],
+        },
+    },
+    {
+        name: "set_provider",
+        description: "Switch the LLM provider. Triggered by 'change provider to openai', 'switch to anthropic'.",
+        parameters: {
+            type: "object",
+            properties: { provider: { type: "string", description: "Provider name", enum: ["openai", "anthropic", "gemini", "groq", "deepseek", "together", "mistral", "openrouter", "qwen"] } },
+            required: ["provider"],
+        },
+    },
+    {
+        name: "show_ai_config",
+        description: "Show current LLM provider, model, and available models. Triggered by 'what model am I using', 'show ai config', 'my llm info'.",
+        parameters: { type: "object", properties: {}, required: [] },
+    },
+    {
+        name: "remove_ai_key",
+        description: "Remove the stored LLM API key. Triggered by 'remove my key', 'delete api key', 'clear llm key'.",
+        parameters: { type: "object", properties: {}, required: [] },
+    },
+    {
+        name: "reset_conversation",
+        description: "Clear conversation history. Triggered by 'reset', 'start over', 'clear chat', 'forget everything'.",
         parameters: { type: "object", properties: {}, required: [] },
     },
 ];

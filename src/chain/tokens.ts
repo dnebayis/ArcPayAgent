@@ -1,5 +1,6 @@
 import { ethers } from "ethers";
-import { STABLECOIN_DECIMALS } from "./config";
+
+const STABLECOIN_DECIMALS = 6;
 
 const ERC20_ABI = [
     "function balanceOf(address account) view returns (uint256)",

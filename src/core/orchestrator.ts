@@ -9,6 +9,8 @@ import type { Sender } from "./sender";
 import type { LLMKeyStore } from "../store/keys";
 import { getConfig } from "../config";
 
+const VALID_PROVIDERS = ["openai", "anthropic", "gemini", "groq", "deepseek", "together", "mistral", "openrouter", "qwen"];
+
 /**
  * Actions where the LLM's pre-tool message is NEVER sent to Telegram.
  * The engine/action handler is the sole sender.
@@ -28,6 +30,7 @@ const SILENT_ACTIONS = new Set([
     "get_crypto_prices", "get_fx_rate", "get_arc_network_stats", "get_my_arc_activity",
     "create_payment_request", "analyze_invoice",
     "remove_vendor", "remove_all_vendors", "save_vendor",
+    "set_model", "set_provider", "show_ai_config", "remove_ai_key", "reset_conversation",
 ]);
 
 const CONFIRMATION_PHRASES = new Set([
@@ -97,15 +100,19 @@ export class Orchestrator {
         if (!auth) {
             if (await this.tryKeywordFallback(chatId, text)) return;
             await this.sender.send(chatId,
-                "No LLM key configured. Basic commands still work:\n" +
-                "  \"wallet\" — show balance\n" +
-                "  \"create wallet\" — set up wallet\n" +
-                "  \"vendors\" — list vendors\n" +
-                "  \"schedules\" — list schedules\n" +
-                "  \"report\" — spending report\n" +
-                "  \"faucet\" — get USDC faucet link\n\n" +
-                "For AI features: /llmkey <provider> <api_key>\n\n" +
-                "Note: If you already set a key and see this message, the server may have restarted. Please run /llmkey again."
+                "No AI key configured. To get started, type:\n\n" +
+                "  openai <your-key>\n" +
+                "  anthropic <your-key>\n" +
+                "  gemini <your-key>\n" +
+                "  qwen <your-key>\n\n" +
+                "Basic commands work without a key:\n" +
+                "  wallet — show balance\n" +
+                "  create wallet — set up wallet\n" +
+                "  vendors — saved contacts\n" +
+                "  schedules — active schedules\n" +
+                "  report — spending report\n" +
+                "  faucet — get testnet USDC\n\n" +
+                "If you already set a key and see this, the server restarted. Just type your key again."
             );
             return;
         }
@@ -168,11 +175,27 @@ export class Orchestrator {
     }
 
     /**
-     * Match simple read-only commands when no LLM key is set.
+     * Match simple commands when no LLM key is set.
      * Returns true if a fallback action was dispatched.
      */
     private async tryKeywordFallback(chatId: number, text: string): Promise<boolean> {
         const t = text.toLowerCase().trim();
+
+        // LLM key setup: "openai sk-...", "set my openai key sk-...", "anthropic key sk-ant-..."
+        // Also handle legacy "/llmkey openai sk-..." format
+        const keyMatch = t.match(
+            /^(?:\/llmkey\s+|(?:set\s+)?(?:my\s+)?(?:llm\s+)?(?:api\s+)?key\s+)?([a-z]+)\s+(?:key\s+)?([A-Za-z0-9_\-\.]+)$/
+        );
+        if (keyMatch) {
+            const [, provider, key] = keyMatch;
+            if (VALID_PROVIDERS.includes(provider) && key.length > 8) {
+                await this.keys.setKey(chatId, provider, key);
+                await this.sender.send(chatId,
+                    `LLM configured: ${provider}\nYour key is stored encrypted.\n\nYou can now use natural language to interact with ArcPay.`
+                );
+                return true;
+            }
+        }
 
         const match = (patterns: string[]): boolean => patterns.some(p => t.includes(p));
 

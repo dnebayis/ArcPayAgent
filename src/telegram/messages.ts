@@ -39,22 +39,21 @@ export function attachMessageHandlers(bot: TelegramBot, deps: BotDeps): void {
                 "━━━━━━━━━━━━━━━━━━━━\n" +
                 "AI payment assistant on Arc Network.\n\n" +
                 "First steps:\n" +
-                "  create wallet     → set up your wallet\n" +
-                "  show wallet       → check balance\n" +
+                "  create wallet       → set up your wallet\n" +
+                "  show wallet         → check balance\n" +
                 "  send 5 USDC to alice  → make a payment\n\n" +
                 "More you can do:\n" +
-                "  list vendors      → saved contacts\n" +
-                "  report            → spending overview\n" +
-                "  schedule payment  → recurring transfers\n" +
-                "  BTC price         → live crypto prices\n" +
-                "  upload invoice    → PDF/image analysis\n\n" +
-                "Testnet USDC faucet:\n" +
-                "  https://faucet.circle.com  (select Arc network)\n\n" +
-                "AI setup (required for natural language):\n" +
-                "  /llmkey openai sk-...     → OpenAI\n" +
-                "  /llmkey anthropic sk-ant-...  → Anthropic\n" +
-                "  /llmkey gemini AIza...    → Gemini\n\n" +
-                "Type /help for all commands.\n\n" +
+                "  list vendors        → saved contacts\n" +
+                "  report              → spending overview\n" +
+                "  schedule payment    → recurring transfers\n" +
+                "  BTC price           → live crypto prices\n" +
+                "  upload invoice      → PDF/image analysis\n\n" +
+                "Testnet USDC:\n" +
+                "  faucet              → get faucet link\n\n" +
+                "AI setup — just type one of these:\n" +
+                "  openai <your-key>\n" +
+                "  anthropic <your-key>\n" +
+                "  gemini <your-key>\n\n" +
                 "Follow us: x.com/ArcPayAgent"
             );
             return;
@@ -62,26 +61,24 @@ export function attachMessageHandlers(bot: TelegramBot, deps: BotDeps): void {
 
         if (msg.text === "/help") {
             await deps.sender.send(chatId,
-                "ArcPay — Command Reference\n" +
+                "ArcPay — What can I do?\n" +
                 "━━━━━━━━━━━━━━━━━━━━\n\n" +
-                "AI Configuration\n" +
-                "  /llmkey <provider> <key> [model]\n" +
-                "  /model <model_name>\n" +
-                "  /provider <name>\n" +
-                "  /llminfo\n" +
-                "  /llmremove\n\n" +
                 "Payments\n" +
                 "  send 5 USDC to alice\n" +
                 "  send 10 EURC to 0x...\n" +
-                "  request 20 USDC\n\n" +
+                "  request 20 USDC from someone\n\n" +
                 "Vendors\n" +
-                "  save vendor alice 0x...\n" +
-                "  list vendors\n" +
+                "  save alice 0x... as vendor\n" +
+                "  list my vendors\n" +
                 "  remove vendor alice\n\n" +
                 "Schedules\n" +
-                "  schedule 10 USDC to alice weekly\n" +
-                "  list schedules\n" +
+                "  schedule 10 USDC to alice every week\n" +
+                "  list my schedules\n" +
                 "  cancel schedule <id>\n\n" +
+                "Wallet\n" +
+                "  create wallet\n" +
+                "  show wallet\n" +
+                "  wallet analysis\n\n" +
                 "Analytics\n" +
                 "  report / account summary\n" +
                 "  recent payments\n" +
@@ -89,38 +86,20 @@ export function attachMessageHandlers(bot: TelegramBot, deps: BotDeps): void {
                 "Research\n" +
                 "  BTC price\n" +
                 "  1000 EUR in USD\n\n" +
-                "Other\n" +
-                "  /reset — clear conversation\n" +
+                "Alerts\n" +
                 "  watch my wallet\n" +
-                "  alert me when BTC hits $100k\n\n" +
-                "Providers: " + VALID_PROVIDERS.join(", ")
+                "  alert me when BTC hits $100k\n" +
+                "  list my alerts\n\n" +
+                "AI Settings\n" +
+                "  openai <key>         → set key\n" +
+                "  what model am I using\n" +
+                "  change model to gpt-4o\n" +
+                "  change provider to anthropic\n" +
+                "  remove my ai key\n" +
+                "  reset conversation\n\n" +
+                "Other\n" +
+                "  faucet               → testnet USDC link"
             );
-            return;
-        }
-
-        if (msg.text?.startsWith("/llmkey")) {
-            await handleLLMKey(chatId, msg.text, deps);
-            return;
-        }
-
-        if (msg.text?.startsWith("/model")) {
-            await handleModelChange(chatId, msg.text, deps);
-            return;
-        }
-
-        if (msg.text?.startsWith("/provider")) {
-            await handleProviderChange(chatId, msg.text, deps);
-            return;
-        }
-
-        if (msg.text === "/llminfo") {
-            await handleLLMInfo(chatId, deps);
-            return;
-        }
-
-        if (msg.text === "/llmremove") {
-            await deps.keys.removeKey(chatId);
-            await deps.sender.send(chatId, "LLM API key removed.");
             return;
         }
 
@@ -130,143 +109,16 @@ export function attachMessageHandlers(bot: TelegramBot, deps: BotDeps): void {
             return;
         }
 
-        if (msg.text === "/watch_payments_enable" || msg.text === "/watch") {
-            await deps.orchestrator.handleMessage(chatId, "enable payment notifications");
-            return;
-        }
-
-        if (msg.text === "/watch_payments_disable") {
-            await deps.orchestrator.handleMessage(chatId, "disable payment notifications");
-            return;
-        }
-
+        // Text messages → orchestrator handles all natural language
         if (msg.text) {
             await deps.orchestrator.handleMessage(chatId, msg.text);
         }
 
+        // Document/photo → invoice analysis
         if (msg.document || msg.photo) {
             await handleDocument(bot, chatId, msg, deps);
         }
     });
-}
-
-async function handleLLMKey(chatId: number, text: string, deps: BotDeps): Promise<void> {
-    const parts = text.split(/\s+/);
-    if (parts.length < 3) {
-        await deps.sender.send(chatId,
-            "Usage: /llmkey <provider> <api_key> [model]\n\n" +
-            "Providers: " + VALID_PROVIDERS.join(", ") + "\n\n" +
-            "Example:\n" +
-            "  /llmkey openai sk-...\n" +
-            "  /llmkey anthropic sk-ant-... claude-sonnet-4-20250514\n" +
-            "  /llmkey gemini AIza..."
-        );
-        return;
-    }
-
-    const provider = parts[1].toLowerCase();
-    const key = parts[2];
-    const model = parts[3] || undefined;
-
-    if (!VALID_PROVIDERS.includes(provider)) {
-        await deps.sender.send(chatId, `Unknown provider "${provider}".\n\nValid providers: ${VALID_PROVIDERS.join(", ")}`);
-        return;
-    }
-
-    await deps.keys.setKey(chatId, provider, key, model);
-
-    let reply = `LLM configured: ${provider}`;
-    if (model) reply += ` (model: ${model})`;
-    reply += "\nYour key is stored encrypted.";
-
-    const models = DEFAULT_MODELS[provider];
-    if (models && !model) {
-        reply += `\n\nDefault model will be used. Change anytime with:\n/model <name>\n\nAvailable: ${models.join(", ")}`;
-    }
-
-    await deps.sender.send(chatId, reply);
-}
-
-async function handleModelChange(chatId: number, text: string, deps: BotDeps): Promise<void> {
-    const parts = text.split(/\s+/);
-    if (parts.length < 2) {
-        const info = await deps.keys.getInfo(chatId);
-        if (!info) {
-            await deps.sender.send(chatId, "No LLM key configured. Use /llmkey first.");
-            return;
-        }
-        const models = DEFAULT_MODELS[info.provider] || [];
-        await deps.sender.send(chatId,
-            `Usage: /model <model_name>\n\n` +
-            `Current provider: ${info.provider}\n` +
-            `Current model: ${info.model || "(default)"}\n\n` +
-            (models.length > 0 ? `Available models for ${info.provider}:\n${models.map(m => `  ${m}`).join("\n")}` : "")
-        );
-        return;
-    }
-
-    const model = parts[1];
-    const success = await deps.keys.setModel(chatId, model);
-    if (!success) {
-        await deps.sender.send(chatId, "No LLM key configured. Use /llmkey first.");
-        return;
-    }
-    await deps.sender.send(chatId, `Model changed to: ${model}`);
-}
-
-async function handleProviderChange(chatId: number, text: string, deps: BotDeps): Promise<void> {
-    const parts = text.split(/\s+/);
-    if (parts.length < 2) {
-        const info = await deps.keys.getInfo(chatId);
-        await deps.sender.send(chatId,
-            `Usage: /provider <name>\n\n` +
-            `Current: ${info?.provider || "not set"}\n` +
-            `Available: ${VALID_PROVIDERS.join(", ")}\n\n` +
-            `Note: Switching provider keeps your API key. If the new provider needs a different key, use /llmkey instead.`
-        );
-        return;
-    }
-
-    const provider = parts[1].toLowerCase();
-    if (!VALID_PROVIDERS.includes(provider)) {
-        await deps.sender.send(chatId, `Unknown provider "${provider}".\n\nValid: ${VALID_PROVIDERS.join(", ")}`);
-        return;
-    }
-
-    const success = await deps.keys.setProvider(chatId, provider);
-    if (!success) {
-        await deps.sender.send(chatId, "No LLM key configured. Use /llmkey first.");
-        return;
-    }
-
-    const models = DEFAULT_MODELS[provider] || [];
-    let reply = `Provider changed to: ${provider}`;
-    if (models.length > 0) {
-        reply += `\n\nDefault model will be used. Available:\n${models.map(m => `  ${m}`).join("\n")}\n\nChange with: /model <name>`;
-    }
-    await deps.sender.send(chatId, reply);
-}
-
-async function handleLLMInfo(chatId: number, deps: BotDeps): Promise<void> {
-    const info = await deps.keys.getInfo(chatId);
-    if (!info) {
-        await deps.sender.send(chatId, "No LLM configuration found.\n\nSet up with: /llmkey <provider> <api_key> [model]");
-        return;
-    }
-
-    const models = DEFAULT_MODELS[info.provider] || [];
-    let text = `LLM Configuration\n\n`;
-    text += `Provider: ${info.provider}\n`;
-    text += `Model: ${info.model || "(default)"}\n`;
-    text += `Key: ****configured****\n`;
-
-    if (models.length > 0) {
-        text += `\nAvailable models for ${info.provider}:\n${models.map(m => `  ${m}`).join("\n")}`;
-    }
-
-    text += `\n\nCommands:\n  /model <name> — Change model\n  /provider <name> — Switch provider\n  /llmremove — Remove key`;
-
-    await deps.sender.send(chatId, text);
 }
 
 export async function handleDocument(bot: TelegramBot, chatId: number, msg: TelegramBot.Message, deps: BotDeps): Promise<void> {

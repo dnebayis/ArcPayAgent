@@ -46,6 +46,7 @@ import { registerAnalyticsActions } from "./actions/analytics";
 import { registerAlertActions } from "./actions/alerts";
 import { registerResearchActions } from "./actions/research";
 import { registerAgentActions } from "./actions/agent";
+import { registerConfigActions } from "./actions/config";
 
 // Services
 import { SchedulerService } from "./services/scheduler";
@@ -132,6 +133,7 @@ async function main(): Promise<void> {
     registerAlertActions({ alerts, watch, wallets, send });
     registerResearchActions({ wallets, provider, send });
     registerAgentActions({ identityEngine, requestEngine, invoiceEngine, send });
+    registerConfigActions({ keys, memory, send });
 
     // ─── Attach Telegram handlers ───
     attachHandlers(bot, {

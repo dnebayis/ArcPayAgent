@@ -130,7 +130,7 @@ Add secrets: `TELEGRAM_TOKEN`, `CIRCLE_API_KEY`, `CIRCLE_ENTITY_SECRET`, `LLM_KE
 3. Create ethers provider, Circle client, chain clients
 4. Create all stores (13 stores)
 5. Create engines (payment, invoice, analytics, requests, identity)
-6. Register all actions into the action registry
+6. Register all actions into the action registry (8 action groups)
 7. Attach Telegram handlers (polling or webhook)
 8. Reconcile in-flight Circle transactions
 9. Initialize ERC-8004 agent identity (if configured)
@@ -155,9 +155,9 @@ Add secrets: `TELEGRAM_TOKEN`, `CIRCLE_API_KEY`, `CIRCLE_ENTITY_SECRET`, `LLM_KE
 2. Confirm `CIRCLE_ENTITY_SECRET` is exactly 64 hex chars
 3. Confirm `PAYABLES_ROUTER_ADDRESS` is a valid `0x` address
 4. Deploy and verify `GET /health` returns 200
-5. In Telegram: `create wallet`
-6. Fund wallet with testnet USDC (via Circle faucet or transfer)
-7. Set LLM key: `/llmkey openai sk-...`
+5. In Telegram: type `create wallet`
+6. Fund wallet: type `faucet` to get the testnet USDC link
+7. Set LLM key: type `openai <your-key>` (or anthropic / gemini / qwen)
 8. Test: `send 0.01 usdc to 0x<test_address>`
 9. Verify payment card shows `[Confirm]` and `[Cancel]` buttons
 10. Confirm payment, verify tx appears on arcscan

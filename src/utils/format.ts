@@ -21,14 +21,3 @@ export function parseAmount(str: string): bigint {
     return ethers.parseUnits(str, STABLECOIN_DECIMALS);
 }
 
-/**
- * Check if a string is a valid positive amount.
- */
-export function isValidAmount(str: string): boolean {
-    try {
-        const amt = parseAmount(str);
-        return amt > 0n;
-    } catch {
-        return false;
-    }
-}
