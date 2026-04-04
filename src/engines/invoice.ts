@@ -203,12 +203,15 @@ export class InvoiceEngine {
     }
 
     private async parseInvoice(auth: LLMAuth, text: string): Promise<ParsedInvoice | null> {
+        // Truncate to avoid LLM timeouts — invoice fields are always near the top
+        const truncated = text.slice(0, 4000);
+
         const messages = [
             {
                 role: "system",
                 content: `Extract invoice details from the provided text. Return JSON with fields: vendor (string), amount (string, numeric only), currency (string, e.g. USD/EUR/GBP), invoiceNumber (string, optional), date (string, optional). If you cannot extract, return {"error": "cannot parse"}.`,
             },
-            { role: "user", content: text },
+            { role: "user", content: truncated },
         ];
 
         const result = await requestJsonCompletion(auth, messages);

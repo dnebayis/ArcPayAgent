@@ -2,6 +2,7 @@ import { logger } from "../utils/logger";
 import { toolsForOpenAI, toolsForAnthropic, toolsForGemini } from "./tools";
 
 const DEFAULT_TIMEOUT = 30_000;
+const JSON_TIMEOUT = 45_000; // invoice/research JSON completion — larger prompts need more time
 const DEFAULT_RETRIES = 2;
 
 export interface ToolCallResponse {
@@ -127,7 +128,7 @@ async function callOpenAIJson(auth: LLMAuth, messages: any[]): Promise<string | 
     const model = auth.model || defaultModel(auth.provider);
 
     const body = { model, messages, response_format: { type: "json_object" } };
-    const res = await postJson(`${base}/chat/completions`, auth.key, body);
+    const res = await postJson(`${base}/chat/completions`, auth.key, body, undefined, JSON_TIMEOUT);
     return res.choices?.[0]?.message?.content ?? null;
 }
 
@@ -170,7 +171,7 @@ async function callAnthropicJson(auth: LLMAuth, messages: any[]): Promise<string
     const body = { model, max_tokens: 1024, system: systemMsg, messages: chatMsgs };
     const res = await postJson("https://api.anthropic.com/v1/messages", auth.key, body, {
         "anthropic-version": "2023-06-01",
-    });
+    }, JSON_TIMEOUT);
     return res.content?.[0]?.text ?? null;
 }
 
@@ -221,17 +222,17 @@ async function callGeminiJson(auth: LLMAuth, messages: any[]): Promise<string | 
     if (systemInstruction) body.system_instruction = { parts: [{ text: systemInstruction }] };
 
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${auth.key}`;
-    const res = await postJson(url, "", body);
+    const res = await postJson(url, "", body, undefined, JSON_TIMEOUT);
     return res.candidates?.[0]?.content?.parts?.[0]?.text ?? null;
 }
 
 // ---- HTTP helper ----
 
-async function postJson(url: string, apiKey: string, body: any, extraHeaders?: Record<string, string>): Promise<any> {
+async function postJson(url: string, apiKey: string, body: any, extraHeaders?: Record<string, string>, timeoutMs = DEFAULT_TIMEOUT): Promise<any> {
     for (let attempt = 0; attempt <= DEFAULT_RETRIES; attempt++) {
         try {
             const controller = new AbortController();
-            const timeout = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT);
+            const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
             const headers: Record<string, string> = { "Content-Type": "application/json", ...extraHeaders };
             if (apiKey) {
