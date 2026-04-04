@@ -53,6 +53,10 @@ export class PendingPaymentStore {
 }
 
 function rowToPending(row: any): PendingPayment {
+    let source: PaymentSource | undefined;
+    if (row.source) {
+        try { source = JSON.parse(row.source); } catch { /* corrupted — ignore */ }
+    }
     return {
         beneficiary: row.beneficiary,
         vendorName: row.vendor_name,
@@ -61,6 +65,6 @@ function rowToPending(row: any): PendingPayment {
         memo: row.memo,
         token: row.token as "USDC" | "EURC",
         createdAt: Number(row.created_at),
-        source: row.source ? JSON.parse(row.source) : undefined,
+        source,
     };
 }

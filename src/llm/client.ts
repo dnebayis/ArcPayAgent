@@ -1,6 +1,5 @@
 import { logger } from "../utils/logger";
 import { toolsForOpenAI, toolsForAnthropic, toolsForGemini } from "./tools";
-import type { ChatMessage } from "../memory/conversation";
 
 const DEFAULT_TIMEOUT = 30_000;
 const DEFAULT_RETRIES = 2;

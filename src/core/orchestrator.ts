@@ -2,14 +2,13 @@ import { logger } from "../utils/logger";
 import { requestToolCompletion, type LLMAuth } from "../llm/client";
 import { buildSystemPrompt } from "../llm/prompt";
 import { TERMINAL_ACTIONS } from "../llm/tools";
+import { VALID_PROVIDERS } from "../llm/constants";
 import { executeAction, hasAction } from "../actions/registry";
 import type { ConversationMemory } from "../memory/conversation";
 import type { FlowStateManager } from "./state";
 import type { Sender } from "./sender";
 import type { LLMKeyStore } from "../store/keys";
 import { getConfig } from "../config";
-
-const VALID_PROVIDERS = ["openai", "anthropic", "gemini", "groq", "deepseek", "together", "mistral", "openrouter", "qwen"];
 
 /**
  * Actions where the LLM's pre-tool message is NEVER sent to Telegram.
@@ -35,12 +34,11 @@ const SILENT_ACTIONS = new Set([
 
 const CONFIRMATION_PHRASES = new Set([
     "yes", "confirm", "ok", "go", "proceed", "send", "send it", "do it",
-    "sure", "yep", "yeah", "evet", "tamam", "onay", "onayla", "gönder",
+    "sure", "yep", "yeah", "absolutely", "approve",
 ]);
 
 const CANCEL_PHRASES = new Set([
-    "no", "cancel", "stop", "abort", "nevermind", "nope", "nah",
-    "hayır", "iptal", "vazgeç",
+    "no", "cancel", "stop", "abort", "nevermind", "nope", "nah", "reject",
 ]);
 
 export class Orchestrator {

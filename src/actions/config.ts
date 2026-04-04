@@ -1,20 +1,7 @@
 import { registerAction } from "./registry";
+import { VALID_PROVIDERS, DEFAULT_MODELS } from "../llm/constants";
 import type { LLMKeyStore } from "../store/keys";
 import type { ConversationMemory } from "../memory/conversation";
-
-const VALID_PROVIDERS = ["openai", "anthropic", "gemini", "groq", "deepseek", "together", "mistral", "openrouter", "qwen"];
-
-const DEFAULT_MODELS: Record<string, string[]> = {
-    openai: ["gpt-4.1-mini", "gpt-4.1", "gpt-4.1-nano", "gpt-4o", "gpt-4o-mini"],
-    anthropic: ["claude-sonnet-4-20250514", "claude-haiku-4-20250414"],
-    gemini: ["gemini-2.0-flash", "gemini-2.5-pro-preview-06-05"],
-    groq: ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"],
-    deepseek: ["deepseek-chat", "deepseek-reasoner"],
-    together: ["meta-llama/Llama-3.3-70B-Instruct-Turbo"],
-    mistral: ["mistral-small-latest", "mistral-large-latest"],
-    openrouter: ["anthropic/claude-sonnet-4", "openai/gpt-4.1-mini"],
-    qwen: ["qwen-plus", "qwen-turbo", "qwen-max"],
-};
 
 export interface ConfigActionDeps {
     keys: LLMKeyStore;

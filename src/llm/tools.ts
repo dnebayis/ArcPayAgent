@@ -3,6 +3,8 @@
  * English only. No Turkish examples.
  */
 
+import { VALID_PROVIDERS } from "./constants";
+
 export interface ToolDef {
     name: string;
     description: string;
@@ -301,7 +303,7 @@ export const TOOL_DEFINITIONS: ToolDef[] = [
         description: "Switch the LLM provider. Triggered by 'change provider to openai', 'switch to anthropic'.",
         parameters: {
             type: "object",
-            properties: { provider: { type: "string", description: "Provider name", enum: ["openai", "anthropic", "gemini", "groq", "deepseek", "together", "mistral", "openrouter", "qwen"] } },
+            properties: { provider: { type: "string", description: "Provider name", enum: [...VALID_PROVIDERS] } },
             required: ["provider"],
         },
     },

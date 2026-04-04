@@ -72,13 +72,18 @@ export class InvoiceStore {
     }
 }
 
+function safeJsonParse(str: string | null | undefined): any {
+    if (!str) return undefined;
+    try { return JSON.parse(str); } catch { return undefined; }
+}
+
 function rowToSession(row: any): InvoiceSession {
     return {
         id: row.session_id,
         status: row.status,
-        invoice: JSON.parse(row.invoice_data),
-        risk: row.risk ? JSON.parse(row.risk) : undefined,
-        resolution: row.resolution ? JSON.parse(row.resolution) : undefined,
+        invoice: safeJsonParse(row.invoice_data) ?? { vendor: "", amount: "0", currency: "USD" },
+        risk: safeJsonParse(row.risk),
+        resolution: safeJsonParse(row.resolution),
         sourceMessageId: row.source_message_id ? Number(row.source_message_id) : undefined,
         openedAt: Number(row.opened_at),
         expiresAt: Number(row.expires_at),

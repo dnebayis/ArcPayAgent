@@ -55,6 +55,10 @@ export class SubmittedTxStore {
 }
 
 function rowToSubmitted(row: any): SubmittedTx {
+    let source: PaymentSource | undefined;
+    if (row.source) {
+        try { source = JSON.parse(row.source); } catch { /* corrupted — ignore */ }
+    }
     return {
         chatId: Number(row.chat_id),
         txId: row.tx_id,
@@ -68,7 +72,7 @@ function rowToSubmitted(row: any): SubmittedTx {
         amount: row.amount,
         memo: row.memo,
         token: row.token as "USDC" | "EURC",
-        source: row.source ? JSON.parse(row.source) : undefined,
+        source,
         submittedAt: Number(row.submitted_at),
     };
 }
