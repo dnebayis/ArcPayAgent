@@ -67,6 +67,13 @@ export function registerPaymentActions(deps: PaymentActionDeps): void {
             nextExecution = defaultNextExecution(freq);
         }
 
+        // For recurring schedules, if the first execution is within the next hour,
+        // push to the next occurrence. A weekly schedule shouldn't fire minutes after creation.
+        if (freq !== "once" && nextExecution - Date.now() < 3_600_000) {
+            const next = advanceSchedule(new Date(nextExecution), freq);
+            if (next) nextExecution = next.getTime();
+        }
+
         const schedule = await deps.schedules.createSchedule(chatId, {
             vendor: vendorName,
             address,
