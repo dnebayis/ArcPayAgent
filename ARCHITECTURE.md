@@ -19,19 +19,21 @@ User message
   │
   ▼
 telegram/bot.ts (attachHandlers)
-  │  commands: /llmkey, /model, /provider, /llminfo, /reset, /start, /help
+  │  commands: /model, /provider, /aiconfig, /removekey, /reset, /start, /help
   │  document/photo → extractText() → invoiceEngine.analyze()
-  │  callback_query → payment/invoice/request handler
+  │  callback_query → telegram/callbacks.ts → payment/invoice/request handler
   │
   ▼
 core/orchestrator.ts (handleMessage)
   │
   ├─ awaiting_confirmation? → redirect to button
   ├─ awaiting_amount? → intercept number → create_payment
+  ├─ no LLM key? → tryKeywordFallback() for basic commands
   │
   ▼
 llm/client.ts (requestToolCompletion)
-  │  builds messages: system prompt + conversation history
+  │  builds messages: system prompt + conversation history (rebuilt per iteration)
+  │  flattenForLLM() → merges tool records, ensures alternating roles
   │  calls provider: OpenAI / Anthropic / Gemini / Groq / ...
   │
   ▼
@@ -41,6 +43,7 @@ SILENT_ACTIONS check
   │
   ▼
 actions/registry.ts (executeAction)
+  │  Zod validation (schemas.ts) → type coercion + error feedback
   │  Map<string, Handler>
   │
   ▼
@@ -69,7 +72,7 @@ const SILENT_ACTIONS = new Set([
 
 ## FlowState Machine
 
-`memory/conversation.ts` is the single source of truth.
+`core/state.ts` (FlowStateManager) wraps the FlowState stored in `memory/conversation.ts`.
 
 ```
 FlowState:
@@ -99,10 +102,12 @@ config → provider → chain clients → stores → memory → sender
 
 ### `src/core/orchestrator.ts`
 - Receives every text turn
-- Builds context from `ConversationMemory.buildContextSummary()`
+- Builds rich context once via `ConversationMemory.buildContextSummary()` (wallet balance, vendor/schedule counts)
+- Agent loop: rebuilds message history each iteration so LLM sees tool results
+- Records tool calls in memory via `addToolCallMessage()`
 - Calls LLM via `requestToolCompletion()`
-- Enforces SILENT_ACTIONS → dispatches to `executeAction()`
-- Handles `awaiting_amount` interception
+- Enforces SILENT_ACTIONS → dispatches to `executeAction()` with validation
+- Handles `awaiting_amount` interception and no-key keyword fallback
 
 ### `src/core/sender.ts`
 All outgoing Telegram messages pass through here.
@@ -140,10 +145,10 @@ encodePay(beneficiary, amount, memo)
   → encodes pay(to, amount, proofHash, memo)
 ```
 
-### `src/store/base.ts`
-- JSON file backend (`data/{ns}.json`) or PostgreSQL (`kv` table)
-- Write queue prevents concurrent file writes
-- In-memory read cache
+### `src/store/db.ts`
+- SQLite (WAL mode) or PostgreSQL persistence
+- 13 typed SQL tables, auto-created on first boot
+- Legacy `kv` table auto-migrated if present
 
 ## Payment State Stores
 
@@ -175,9 +180,12 @@ payment_logs       written ONLY after COMPLETE terminal state
 |--------|------|
 | Payment behavior | `src/engines/payment.ts` |
 | LLM routing / SILENT_ACTIONS | `src/core/orchestrator.ts` |
-| Add new tool | `src/llm/tools.ts` + `src/actions/registry.ts` |
+| Add new tool | `src/llm/tools.ts` + `src/actions/registry.ts` + `src/actions/schemas.ts` |
 | System prompt | `src/llm/prompt.ts` |
-| Telegram commands | `src/telegram/bot.ts` |
-| Store schema | `src/store/{name}.ts` |
+| Telegram commands | `src/telegram/bot.ts` + `src/telegram/messages.ts` |
+| Button callbacks | `src/telegram/callbacks.ts` |
+| AI config actions | `src/actions/config.ts` |
+| Provider/model constants | `src/llm/constants.ts` |
+| Store schema | `src/store/db.ts` + `src/store/{name}.ts` |
 | App wiring / DI | `src/main.ts` |
 | Invoice parsing | `src/utils/parser.ts` + `src/engines/invoice.ts` |

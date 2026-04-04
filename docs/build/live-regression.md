@@ -48,9 +48,9 @@ is this safe? → risk explanation from LLM
 ### 6. LLM Config
 
 ```
-/llmkey openai sk-...    → "LLM configured: openai"
+openai sk-...            → "LLM configured: openai"
 /model gpt-4.1           → "Model changed to: gpt-4.1"
-/llminfo                 → shows provider + model
+/aiconfig                → shows provider + model
 ```
 
 ## Pass Criteria
@@ -60,4 +60,4 @@ is this safe? → risk explanation from LLM
 - [ ] [Confirm] completes payment and shows tx link
 - [ ] Invoice PDF is parsed (not empty text)
 - [ ] No Turkish text in any response
-- [ ] /llmkey, /model, /provider all work
+- [ ] Natural language key entry, /model, /provider, /aiconfig all work

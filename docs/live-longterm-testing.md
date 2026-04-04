@@ -3,9 +3,11 @@
 ## After 24h+ Uptime
 
 ### Memory
-- [ ] Conversation memory does not grow unbounded
+- [ ] Conversation memory does not grow unbounded (max 100 messages, overflow summarized)
 - [ ] FlowState resets after payment completion
 - [ ] Multiple users do not interfere with each other
+- [ ] Tool call records (role: "tool") are stored but not leaked to LLM output
+- [ ] RichContextProvider returns fresh wallet balance each turn
 
 ### Services
 - [ ] Scheduler fires within ~10s of due time

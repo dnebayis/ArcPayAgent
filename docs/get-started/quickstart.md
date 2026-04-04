@@ -32,18 +32,20 @@ LLM_KEY_SECRET=
 1. Start the bot
 2. In Telegram: `create wallet`
 3. Fund wallet with testnet USDC
-4. Set LLM key: `/llmkey openai sk-...`
+4. Set LLM key: `openai sk-...`
 5. Test payment: `send 0.01 usdc to 0x<address>`
 
 ## LLM Setup Commands
 
 ```
-/llmkey openai sk-...              Set API key
-/llmkey anthropic sk-ant-...       Set Anthropic key
-/model gpt-4.1-mini                Change model
+openai sk-...                      Set API key (natural language)
+anthropic sk-ant-...               Set Anthropic key
+gemini AIza...                     Set Gemini key
+/model gpt-4.1-mini               Change model
 /provider anthropic                Switch provider
-/llminfo                           Show current config
-/llmremove                         Remove key
+/aiconfig                          Show current config
+/removekey                         Remove key
+/reset                             Clear conversation history
 ```
 
 Supported providers: `openai`, `anthropic`, `gemini`, `groq`, `deepseek`, `together`, `mistral`, `openrouter`, `qwen`

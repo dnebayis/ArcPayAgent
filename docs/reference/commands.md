@@ -6,12 +6,22 @@
 |---------|---------|
 | `/start` | Welcome message |
 | `/help` | Command list |
-| `/llmkey <provider> <key> [model]` | Set LLM API key |
 | `/model <name>` | Change model |
 | `/provider <name>` | Switch provider (keeps key) |
-| `/llminfo` | Show LLM config |
-| `/llmremove` | Remove LLM key |
-| `/reset` | Clear conversation |
+| `/aiconfig` | Show current AI config |
+| `/removekey` | Remove LLM key |
+| `/reset` | Clear conversation history |
+
+## LLM Key Setup (natural language)
+
+| Input | Purpose |
+|-------|---------|
+| `openai sk-...` | Set OpenAI key |
+| `anthropic sk-ant-...` | Set Anthropic key |
+| `gemini AIza...` | Set Gemini key |
+| `qwen sk-...` | Set Qwen key |
+
+Supported providers: `openai`, `anthropic`, `gemini`, `groq`, `deepseek`, `together`, `mistral`, `openrouter`, `qwen`
 
 ## Wallet
 

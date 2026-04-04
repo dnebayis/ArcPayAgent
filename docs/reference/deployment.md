@@ -29,5 +29,5 @@ Health path: /health
 4. `/health` returns 200
 5. `create wallet` in Telegram
 6. Fund wallet with testnet USDC
-7. `/llmkey openai sk-...`
+7. `openai sk-...` (set LLM key)
 8. `send 0.01 usdc to 0x<address>` → card with [Confirm] [Cancel]

@@ -3,14 +3,15 @@
 ## Layer Diagram
 
 ```
-Telegram (telegram/bot.ts)
+Telegram (telegram/bot.ts + messages.ts + callbacks.ts)
   → core/orchestrator.ts
-    → llm/client.ts (OpenAI / Anthropic / Gemini / Groq / ...)
+    → memory/conversation.ts (buildContextSummary + RichContextProvider)
+    → llm/client.ts (flattenForLLM → OpenAI / Anthropic / Gemini / Groq / ...)
     → SILENT_ACTIONS check
-    → actions/registry.ts (Map<string, Handler>)
+    → actions/registry.ts (Zod validation via schemas.ts → Map<string, Handler>)
       → engines/* (payment, invoice, analytics, requests, identity)
         → chain/* (circle, tokens, router, erc8004)
-        → store/* (wallets, vendors, payments, ...)
+        → store/* (db.ts + 12 typed stores)
       → core/sender.ts (memory sync + safeSend)
 
 Background:
@@ -24,13 +25,19 @@ Background:
 | File | Responsibility |
 |------|---------------|
 | `src/main.ts` | DI wiring, startup sequence |
-| `src/core/orchestrator.ts` | LLM loop, SILENT_ACTIONS, dispatch |
+| `src/core/orchestrator.ts` | LLM agent loop, SILENT_ACTIONS, tool feedback, dispatch |
 | `src/core/sender.ts` | All outgoing messages + memory sync |
-| `src/memory/conversation.ts` | FlowState + message history |
+| `src/core/state.ts` | FlowStateManager (payment flow state) |
+| `src/memory/conversation.ts` | Message history + RichContextProvider + tool call records |
 | `src/engines/payment.ts` | Payment lifecycle (most critical) |
 | `src/chain/circle.ts` | Circle DCW API client |
-| `src/store/base.ts` | SQLite/PostgreSQL persistence |
+| `src/store/db.ts` | SQLite/PostgreSQL typed SQL persistence |
 | `src/telegram/bot.ts` | Telegram handler registration |
+| `src/telegram/messages.ts` | Message formatters (start, help, AI config display) |
+| `src/telegram/callbacks.ts` | Inline button callback handlers |
+| `src/actions/schemas.ts` | Zod validation schemas for critical actions |
+| `src/actions/config.ts` | AI config actions (set_model, set_provider, etc.) |
+| `src/llm/constants.ts` | Shared VALID_PROVIDERS + DEFAULT_MODELS |
 | `src/llm/tools.ts` | Tool schemas for LLM |
 | `src/llm/prompt.ts` | System prompt |
 | `src/utils/parser.ts` | PDF + image text extraction |

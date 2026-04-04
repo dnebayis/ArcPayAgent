@@ -26,17 +26,22 @@ src/
 ├── main.ts                   Dependency injection wiring
 ├── health.ts                 HTTP /health endpoint
 ├── core/
-│   ├── orchestrator.ts       LLM agent loop + SILENT_ACTIONS
+│   ├── orchestrator.ts       LLM agent loop + SILENT_ACTIONS + tool feedback
 │   ├── sender.ts             Centralized bot.sendMessage + memory sync
-│   └── state.ts              Payment flow state machine
+│   └── state.ts              FlowStateManager (payment flow state machine)
 ├── llm/
 │   ├── client.ts             Multi-provider: OpenAI/Anthropic/Gemini/Groq/DeepSeek/...
+│   ├── constants.ts          Shared VALID_PROVIDERS + DEFAULT_MODELS
 │   ├── prompt.ts             System prompt (English only)
 │   └── tools.ts              Tool definitions for LLM
 ├── telegram/
-│   └── bot.ts                Handlers: text, PDF/photo, callbacks, /llmkey, /model
+│   ├── bot.ts                attachHandlers: text, PDF/photo, slash commands
+│   ├── messages.ts           Message formatters (start, help, AI config display)
+│   └── callbacks.ts          Inline button callback handlers
 ├── actions/
-│   ├── registry.ts           Map<string, Handler> router
+│   ├── registry.ts           Map<string, Handler> router + Zod validation
+│   ├── schemas.ts            Zod schemas for critical actions (type coercion)
+│   ├── config.ts             AI config actions (set_model, set_provider, etc.)
 │   ├── payment.ts            create_payment, schedule, cancel
 │   ├── vendor.ts             save, list, remove, detail
 │   ├── wallet.ts             create, show, export, intelligence
@@ -54,18 +59,27 @@ src/
 │   ├── circle.ts             Circle DCW API (createWallet, submitTx, pollTx)
 │   ├── tokens.ts             USDC + EURC: balance, approve, transfer
 │   ├── router.ts             Arc Router: pay() encoding
-│   ├── scanner.ts            On-chain PaymentMade event scanning
-│   ├── erc8004.ts            Identity/Reputation/Validation registries
-│   └── config.ts             Arc Testnet constants
-├── store/                    SQLite/PostgreSQL persistence (13 stores)
+│   └── erc8004.ts            Identity/Reputation/Validation registries
+├── store/
+│   ├── db.ts                 SQLite/PostgreSQL typed SQL (13 tables)
+│   ├── wallets.ts            Circle wallet per user
+│   ├── vendors.ts            Address book with payment stats
+│   ├── payments.ts           Payment history
+│   ├── pending.ts            Awaiting user confirmation
+│   ├── submitted.ts          In-flight Circle transactions
+│   ├── schedules.ts          Recurring payment schedules
+│   ├── alerts.ts             Price alert rules
+│   ├── watch.ts              Wallet balance monitoring
+│   ├── invoices.ts           Active invoice sessions
+│   ├── requests.ts           Shareable payment links
+│   ├── keys.ts               Encrypted LLM API keys
+│   └── identity.ts           ERC-8004 on-chain identity
 ├── services/
 │   ├── scheduler.ts          Due schedule check (every 10s)
 │   ├── watcher.ts            Balance change detection (every 30s)
-│   ├── alerter.ts            Price alert check (every 60s)
-│   └── fx.ts                 FX rate cache (Frankfurter)
+│   └── alerter.ts            Price alert check (every 60s)
 ├── memory/
-│   ├── conversation.ts       Message history + FlowState machine
-│   └── episodic.ts           Event tracking
+│   └── conversation.ts       Message history + RichContextProvider + tool call records
 ├── middleware/
 │   ├── rateLimit.ts          Per-user sliding window (10 req/10s)
 │   └── access.ts             ALLOWED_CHAT_IDS allowlist
@@ -77,7 +91,6 @@ src/
     ├── logger.ts             Structured JSON logging
     ├── dates.ts              Date/schedule parsing
     ├── telegram.ts           Safe send + message splitting
-    ├── markdown.ts           Markdown sanitization
     ├── format.ts             Amount formatting (6 decimals)
     └── parser.ts             PDF + image text extraction
 ```
@@ -167,13 +180,14 @@ ARC_GAS_RESERVE_USDC=0.10
 ## LLM Setup (per user)
 
 ```
-/llmkey openai sk-...
-/llmkey anthropic sk-ant-...
-/llmkey gemini AIza...
-/model gpt-4.1-mini
-/provider anthropic
-/llminfo
-/llmremove
+openai sk-...                  Set OpenAI key (natural language)
+anthropic sk-ant-...           Set Anthropic key
+gemini AIza...                 Set Gemini key
+/model gpt-4.1-mini           Change model
+/provider anthropic            Switch provider (keeps key)
+/aiconfig                      Show current AI config
+/removekey                     Remove LLM key
+/reset                         Clear conversation history
 ```
 
 Supported providers: `openai`, `anthropic`, `gemini`, `groq`, `deepseek`, `together`, `mistral`, `openrouter`, `qwen`

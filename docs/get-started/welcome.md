@@ -18,13 +18,21 @@ ArcPay Agent is a Telegram-based USDC/EURC payment assistant for Arc Testnet.
 
 For actions that produce their own output (payment cards, lists, balances), the LLM message is **never** sent. Only the engine sends. This makes the classic "buttons disappeared" bug structurally impossible.
 
+### Tool Result Feedback Loop
+
+The orchestrator rebuilds message history each loop iteration so the LLM sees tool results. Tool calls are recorded in memory, and `executeAction()` validates parameters with Zod schemas before dispatch.
+
+### Rich Context
+
+The system prompt includes real-time wallet balance, vendor count, and schedule count — so the LLM can answer questions like "do I have enough?" without extra tool calls.
+
 ### Single LLM Path
 
 Tool-calling mode only. No JSON fallback, no dual execution paths.
 
 ### FlowState Machine
 
-Single source of truth for conversation state. `awaiting_confirmation` is set exactly once — when the payment card appears — and cleared exactly once — when Confirm or Cancel is pressed.
+Single source of truth for conversation state (`core/state.ts`). `awaiting_confirmation` is set exactly once — when the payment card appears — and cleared exactly once — when Confirm or Cancel is pressed.
 
 ## Start Here
 

@@ -24,6 +24,8 @@ User sees the card. Two choices:
 
 ### 3. Execute
 
+`executeAction()` validates parameters with Zod schemas (type coercion + error feedback) before calling the handler. Returns `ActionResult { success, error? }`.
+
 1. Balance check: wallet ≥ amount + gas reserve
 2. "Processing payment..." sent
 3. **Approve TX**: encodeApprove → circle.submitTx() → pollTx()

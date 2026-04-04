@@ -2,7 +2,7 @@
 
 ## FlowState
 
-`memory/conversation.ts` is the single source of truth for payment flow state.
+`core/state.ts` (FlowStateManager) manages the FlowState, backed by `memory/conversation.ts`.
 
 ```typescript
 type FlowState = {
@@ -65,7 +65,7 @@ HIGH_RISK: blocked, cannot proceed
 ## Conversation Memory Per-User
 
 ```
-messages[]       history (max 100, summarize overflow)
+messages[]       history (max 100, summarize overflow; includes "tool" role for call tracking)
 flowState        current FlowState
 lastAction       last tool name (informational only)
 lastPayment      { beneficiary, amount, token }
@@ -73,3 +73,8 @@ lastVendor       { name, address }
 lastSchedule     { id, beneficiary, amount }
 lastInvoice      { vendor, amount, currency } (recall only — cannot reopen payment)
 ```
+
+Key methods:
+- `addToolCallMessage()` — records tool calls with args (role: "tool", filtered from LLM history)
+- `buildContextSummary()` — async, injects real-time wallet balance, vendor/schedule counts via RichContextProvider
+- `getHistory()` — filters out tool role messages to prevent LLM mimicry

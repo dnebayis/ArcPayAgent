@@ -52,10 +52,11 @@ Operational reference for what the agent does, what is partial, and what is out 
 | Feature | Status | Notes |
 |---------|--------|-------|
 | BYOK per user | `Supported` | Encrypted at rest |
-| /llmkey set | `Supported` | /llmkey \<provider\> \<key\> [model] |
-| /model change | `Supported` | /model \<name\> |
-| /provider switch | `Supported` | Keeps existing key |
-| /llminfo | `Supported` | Shows provider + model + available models |
+| Set key (natural language) | `Supported` | `openai sk-...` / `anthropic sk-ant-...` |
+| /model change | `Supported` | `/model <name>` |
+| /provider switch | `Supported` | `/provider <name>` — keeps existing key |
+| /aiconfig | `Supported` | Shows provider + model + available models |
+| /removekey | `Supported` | Deletes stored LLM key |
 | No-key fallback | `Partial` | Bot prompts for key, basic commands still work |
 | OpenAI | `Supported` | |
 | Anthropic | `Supported` | |
@@ -76,8 +77,9 @@ The engine/action is always the sole sender, preventing button disappearing.
 `status`, `create_wallet`, `export_wallet`, `schedule_payment`, `cancel_schedule`,
 `cancel_all_schedules`, `set_price_alert`, `remove_price_alert`, `remove_all_price_alerts`,
 `watch_payments_enable`, `watch_payments_disable`, `get_crypto_prices`, `get_fx_rate`,
-`get_arc_network_stats`, `get_my_arc_activity`, `create_payment_request`,
-`remove_vendor`, `remove_all_vendors`, `save_vendor`
+`get_arc_network_stats`, `get_my_arc_activity`, `create_payment_request`, `analyze_invoice`,
+`remove_vendor`, `remove_all_vendors`, `save_vendor`,
+`set_model`, `set_provider`, `show_ai_config`, `remove_ai_key`, `reset_conversation`
 
 ## Known Limits
 
@@ -122,10 +124,10 @@ The engine/action is always the sole sender, preventing button disappearing.
 - `show my price alerts`
 
 ### LLM Config
-- `/llmkey openai sk-...`
+- `openai sk-...` (natural language key entry)
 - `/model gpt-4.1`
 - `/provider anthropic`
-- `/llminfo`
+- `/aiconfig`
 
 ### Research
 - `BTC price`
