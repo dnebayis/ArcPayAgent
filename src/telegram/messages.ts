@@ -1,6 +1,7 @@
 import TelegramBot from "node-telegram-bot-api";
 import { logger } from "../utils/logger";
 import { VALID_PROVIDERS, DEFAULT_MODELS } from "../llm/constants";
+import { languageToTimezone } from "../utils/dates";
 import type { BotDeps } from "./bot";
 
 export function attachMessageHandlers(bot: TelegramBot, deps: BotDeps): void {
@@ -8,6 +9,13 @@ export function attachMessageHandlers(bot: TelegramBot, deps: BotDeps): void {
         const chatId = msg.chat.id;
 
         if (!deps.access.isPermitted(chatId)) return;
+
+        // Auto-detect timezone from Telegram language_code
+        if (msg.from?.language_code) {
+            const tz = languageToTimezone(msg.from.language_code);
+            if (tz !== 0) deps.memory.setTimezone(chatId, tz);
+        }
+
         if (!deps.limiter.check(chatId)) {
             await deps.sender.send(chatId, "You're sending messages too quickly. Please wait a moment.");
             return;

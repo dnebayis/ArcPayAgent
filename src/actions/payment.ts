@@ -67,6 +67,12 @@ export function registerPaymentActions(deps: PaymentActionDeps): void {
             nextExecution = defaultNextExecution(freq);
         }
 
+        // Apply user timezone offset (server runs in UTC, user means local time)
+        const tzOffset = deps.memory.getTimezone(chatId);
+        if (tzOffset !== 0) {
+            nextExecution -= tzOffset * 3_600_000;
+        }
+
         // For recurring schedules, if the first execution is within the next hour,
         // push to the next occurrence. A weekly schedule shouldn't fire minutes after creation.
         if (freq !== "once" && nextExecution - Date.now() < 3_600_000) {
@@ -86,8 +92,11 @@ export function registerPaymentActions(deps: PaymentActionDeps): void {
         deps.memory.setLastSchedule(chatId, schedule.id, vendorName, Number(amount));
 
         const freqLabel = freq === "once" ? "one-time" : freq;
-        const timeLabel = new Date(nextExecution).toLocaleString("en-US", {
+        // Display in user's local time
+        const displayTime = new Date(nextExecution + tzOffset * 3_600_000);
+        const timeLabel = displayTime.toLocaleString("en-US", {
             month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
+            timeZone: "UTC",
         });
         await deps.send(chatId, `Schedule created: ${Number(amount).toFixed(2)} ${token || "USDC"} to ${vendorName} (${freqLabel}, next: ${timeLabel})`);
     });
@@ -120,8 +129,11 @@ export function registerPaymentActions(deps: PaymentActionDeps): void {
             return;
         }
 
-        const fmt = (ts: number) => new Date(ts).toLocaleString("en-US", {
+        // Display in user's local time
+        const tz = deps.memory.getTimezone(chatId);
+        const fmt = (ts: number) => new Date(ts + tz * 3_600_000).toLocaleString("en-US", {
             month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
+            timeZone: "UTC",
         });
 
         let text = "Active Schedules\n\n";

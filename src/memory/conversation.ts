@@ -28,6 +28,7 @@ interface ChatContext {
     lastVendor?: { name: string; address: string };
     lastSchedule?: { id: string; beneficiary: string; amount: number };
     lastInvoice?: { vendor: string; amount: string; currency: string; invoiceNumber?: string };
+    timezoneOffset?: number; // hours from UTC, e.g. 3 for UTC+3
     loaded: boolean; // has been loaded from DB
 }
 
@@ -185,6 +186,14 @@ export class ConversationMemory {
         this.persist(chatId);
     }
 
+    setTimezone(chatId: number, offset: number): void {
+        this.ensure(chatId).timezoneOffset = offset;
+    }
+
+    getTimezone(chatId: number): number {
+        return this.ensure(chatId).timezoneOffset ?? 0;
+    }
+
     getContext(chatId: number): ChatContext {
         return this.ensure(chatId);
     }
@@ -201,6 +210,10 @@ export class ConversationMemory {
         });
         parts.push(`[Current date/time: ${now}]`);
 
+        if (ctx.timezoneOffset) {
+            const sign = ctx.timezoneOffset >= 0 ? "+" : "";
+            parts.push(`[User timezone: UTC${sign}${ctx.timezoneOffset}]`);
+        }
         if (ctx.flowState.status !== "idle") {
             parts.push(`[Flow state: ${ctx.flowState.status}]`);
         }

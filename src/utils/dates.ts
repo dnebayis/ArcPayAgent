@@ -127,3 +127,17 @@ export function advanceSchedule(date: Date, freq: Frequency): Date | null {
     else if (freq === "monthly") next.setMonth(next.getMonth() + 1);
     return next;
 }
+
+/** Map Telegram language_code to UTC offset (hours). Best-effort heuristic. */
+const LANG_TZ: Record<string, number> = {
+    tr: 3, ru: 3, ar: 3, el: 2, ro: 2, fi: 2, bg: 2, uk: 2,
+    de: 1, fr: 1, es: 1, it: 1, nl: 1, pl: 1, cs: 1, sv: 1, da: 1, no: 1, hu: 1, hr: 1,
+    ja: 9, ko: 9, zh: 8, id: 7, th: 7, vi: 7,
+    hi: 5, in: 5,
+    pt: 0, en: 0,
+};
+
+export function languageToTimezone(langCode?: string): number {
+    if (!langCode) return 0;
+    return LANG_TZ[langCode.toLowerCase().split("-")[0]] ?? 0;
+}
