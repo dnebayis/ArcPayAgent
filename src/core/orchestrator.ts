@@ -123,11 +123,14 @@ export class Orchestrator {
         const config = getConfig();
         const maxIterations = config.MAX_AGENT_ITERATIONS;
 
+        // Build context once per user message — rich context (wallet balance, vendor/schedule counts)
+        // does not change within a single turn, so no need to re-query on every iteration.
+        const contextSummary = await this.memory.buildContextSummary(chatId);
+        const systemPrompt = buildSystemPrompt(contextSummary);
+
         // Agent loop: LLM may chain tool calls
-        // Messages are rebuilt each iteration so tool results (recorded via addBotMessage) are visible to the LLM
+        // History is rebuilt each iteration so tool results (recorded via addBotMessage) are visible to the LLM
         for (let i = 0; i < maxIterations; i++) {
-            const contextSummary = await this.memory.buildContextSummary(chatId);
-            const systemPrompt = buildSystemPrompt(contextSummary);
             const history = this.memory.getHistory(chatId);
             const messages = [
                 { role: "system", content: systemPrompt },

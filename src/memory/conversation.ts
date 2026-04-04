@@ -138,7 +138,11 @@ export class ConversationMemory {
     }
 
     getHistory(chatId: number): ChatMessage[] {
-        return this.ensure(chatId).messages.slice(-MAX_MESSAGES);
+        // Filter out tool call markers — they are internal tracking only.
+        // Sending them to the LLM causes it to mimic the "[Called: ...]" format in plain text responses.
+        return this.ensure(chatId).messages
+            .filter(m => m.role !== "tool")
+            .slice(-MAX_MESSAGES);
     }
 
     // --- Flow state (transient — not persisted) ---
