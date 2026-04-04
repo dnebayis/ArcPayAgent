@@ -5,6 +5,7 @@ import type { VendorStore } from "../store/vendors";
 import type { ConversationMemory } from "../memory/conversation";
 import type { LLMAuth } from "../llm/client";
 import { requestJsonCompletion } from "../llm/client";
+import { getFxRate } from "../research/tools";
 
 const SESSION_EXPIRY_MS = 30 * 60 * 1000; // 30 minutes
 
@@ -86,11 +87,19 @@ export class InvoiceEngine {
             let settlementAmount = parsed.amount;
             let settlementCurrency = "USDC";
 
-            if (parsed.currency.toUpperCase() === "EUR") {
+            const curr = parsed.currency.toUpperCase();
+            if (curr === "EUR" || curr === "EURC") {
                 settlementCurrency = "EURC";
-            } else if (parsed.currency.toUpperCase() !== "USD" && parsed.currency.toUpperCase() !== "USDC") {
-                // Non-USD/EUR currency — keep as USDC, note in session
-                session.status = "review_required";
+            } else if (curr !== "USD" && curr !== "USDC") {
+                // Non-USD/EUR currency — convert to USD via Frankfurter
+                try {
+                    const fx = await getFxRate(curr, "USD", parseFloat(parsed.amount));
+                    if (fx.result > 0) {
+                        settlementAmount = fx.result.toFixed(2);
+                    }
+                } catch {
+                    // FX lookup failed — leave amount as-is, user sees UNCOMMON_CURRENCY flag
+                }
             }
             session.invoice.settlementAmount = settlementAmount;
             session.invoice.settlementCurrency = settlementCurrency;
@@ -180,7 +189,12 @@ export class InvoiceEngine {
         }
 
         if (inv.settlementAmount && inv.settlementCurrency) {
-            text += `\nSettlement: ${inv.settlementAmount} ${inv.settlementCurrency}`;
+            const converted = inv.settlementAmount !== inv.amount || inv.settlementCurrency !== inv.currency;
+            if (converted) {
+                text += `\nSettlement: ${inv.amount} ${inv.currency} → ${inv.settlementAmount} ${inv.settlementCurrency}`;
+            } else {
+                text += `\nSettlement: ${inv.settlementAmount} ${inv.settlementCurrency}`;
+            }
         }
 
         const buttons: any[][] = [];
