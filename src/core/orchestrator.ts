@@ -86,11 +86,14 @@ export class Orchestrator {
                 const state = this.flowState.get(chatId);
                 this.flowState.clear(chatId);
                 // Execute create_payment with the amount
-                await executeAction(chatId, "create_payment", {
+                const r = await executeAction(chatId, "create_payment", {
                     beneficiary: state.beneficiary || "",
                     amount: num,
                     token: state.token || "USDC",
                 });
+                if (!r.success && r.error) {
+                    await this.sender.send(chatId, `Invalid parameters: ${r.error}. Please try again.`);
+                }
                 return;
             }
         }
@@ -117,21 +120,20 @@ export class Orchestrator {
             return;
         }
 
-        // Build messages for LLM
-        const contextSummary = this.memory.buildContextSummary(chatId);
-        const systemPrompt = buildSystemPrompt(contextSummary);
-        const history = this.memory.getHistory(chatId);
-
-        const messages = [
-            { role: "system", content: systemPrompt },
-            ...history,
-        ];
-
         const config = getConfig();
         const maxIterations = config.MAX_AGENT_ITERATIONS;
 
         // Agent loop: LLM may chain tool calls
+        // Messages are rebuilt each iteration so tool results (recorded via addBotMessage) are visible to the LLM
         for (let i = 0; i < maxIterations; i++) {
+            const contextSummary = await this.memory.buildContextSummary(chatId);
+            const systemPrompt = buildSystemPrompt(contextSummary);
+            const history = this.memory.getHistory(chatId);
+            const messages = [
+                { role: "system", content: systemPrompt },
+                ...history,
+            ];
+
             try {
                 const response = await requestToolCompletion(auth, messages);
 
@@ -140,17 +142,24 @@ export class Orchestrator {
                     const toolArgs = response.toolArgs;
 
                     logger.info(chatId, "[Orchestrator] Tool call", { tool: toolName, args: toolArgs, iteration: i });
+                    this.memory.addToolCallMessage(chatId, toolName, toolArgs);
 
                     if (SILENT_ACTIONS.has(toolName)) {
                         // NEVER send LLM message — engine/action is the sole sender
-                        await executeAction(chatId, toolName, toolArgs);
+                        const result = await executeAction(chatId, toolName, toolArgs);
+                        if (!result.success && result.error) {
+                            await this.sender.send(chatId, `Invalid parameters: ${result.error}. Please try again.`);
+                        }
                     } else {
                         // Send LLM message first (if any), then dispatch
                         if (response.message) {
                             await this.sender.send(chatId, response.message);
                         }
                         if (hasAction(toolName)) {
-                            await executeAction(chatId, toolName, toolArgs);
+                            const result = await executeAction(chatId, toolName, toolArgs);
+                            if (!result.success && result.error) {
+                                await this.sender.send(chatId, `Invalid parameters: ${result.error}. Please try again.`);
+                            }
                         }
                     }
 

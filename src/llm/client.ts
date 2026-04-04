@@ -28,22 +28,40 @@ export async function requestToolCompletion(
     const start = Date.now();
     const p = auth.provider.toLowerCase();
 
+    // Flatten tool messages → assistant, merge consecutive same-role (Anthropic needs alternating)
+    const flat = flattenForLLM(messages);
+
     try {
-        if (p === "anthropic") return await callAnthropicTools(auth, messages, start);
-        if (p === "gemini") return await callGeminiTools(auth, messages, start);
-        return await callOpenAITools(auth, messages, start);
+        if (p === "anthropic") return await callAnthropicTools(auth, flat, start);
+        if (p === "gemini") return await callGeminiTools(auth, flat, start);
+        return await callOpenAITools(auth, flat, start);
     } catch (err: any) {
         // 404 = model not found → retry once with provider's default model
         if (err.message?.includes("404") && auth.model) {
             const fallback = defaultModel(p);
             logger.warn(null, "[LLM] Model not found, falling back", { model: auth.model, fallback, provider: p });
             const fallbackAuth = { ...auth, model: fallback };
-            if (p === "anthropic") return callAnthropicTools(fallbackAuth, messages, start);
-            if (p === "gemini") return callGeminiTools(fallbackAuth, messages, start);
-            return callOpenAITools(fallbackAuth, messages, start);
+            if (p === "anthropic") return callAnthropicTools(fallbackAuth, flat, start);
+            if (p === "gemini") return callGeminiTools(fallbackAuth, flat, start);
+            return callOpenAITools(fallbackAuth, flat, start);
         }
         throw err;
     }
+}
+
+/** Flatten "tool" role → "assistant" and merge consecutive assistant messages. */
+function flattenForLLM(messages: Array<{ role: string; content: string }>): Array<{ role: string; content: string }> {
+    const result: Array<{ role: string; content: string }> = [];
+    for (const m of messages) {
+        const role = m.role === "tool" ? "assistant" : m.role;
+        const last = result[result.length - 1];
+        if (last && last.role === role && role === "assistant") {
+            last.content += "\n" + m.content;
+        } else {
+            result.push({ role, content: m.content });
+        }
+    }
+    return result;
 }
 
 // ---- JSON completion (for research synthesis) ----

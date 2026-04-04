@@ -1,5 +1,6 @@
 import { loadConfig, getConfig } from "./config";
 import { logger } from "./utils/logger";
+import { formatAmount } from "./utils/format";
 import { ethers } from "ethers";
 
 // Chain
@@ -91,6 +92,28 @@ async function main(): Promise<void> {
 
     // ─── Memory ───
     const memory = new ConversationMemory(db);
+
+    // ─── Rich context: inject real-time wallet/vendor/schedule data into LLM context ───
+    memory.setRichContextProvider(async (chatId: number) => {
+        const parts: string[] = [];
+        const wallet = await wallets.getWallet(chatId);
+        if (wallet) {
+            try {
+                const usdcBal = await tokens.balanceOf("USDC", wallet.address);
+                const eurcBal = await tokens.balanceOf("EURC", wallet.address);
+                parts.push(`[Wallet: ${wallet.address.slice(0, 6)}...${wallet.address.slice(-4)} | USDC: ${formatAmount(usdcBal)} | EURC: ${formatAmount(eurcBal)}]`);
+            } catch {
+                parts.push(`[Wallet: ${wallet.address.slice(0, 6)}...${wallet.address.slice(-4)}]`);
+            }
+        } else {
+            parts.push("[Wallet: not created]");
+        }
+        const vendorList = await vendors.listVendors(chatId);
+        parts.push(`[Vendors: ${Object.keys(vendorList).length} saved]`);
+        const scheduleList = await schedules.getSchedules(chatId);
+        parts.push(`[Schedules: ${scheduleList.length} active]`);
+        return parts;
+    });
 
     // ─── Bot instance ───
     const TelegramBot = (await import("node-telegram-bot-api")).default;

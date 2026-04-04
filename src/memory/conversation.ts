@@ -1,8 +1,9 @@
 import type { DB } from "../store/db";
 
 export interface ChatMessage {
-    role: "user" | "assistant" | "system";
+    role: "user" | "assistant" | "system" | "tool";
     content: string;
+    toolName?: string;
 }
 
 export interface FlowState {
@@ -35,12 +36,19 @@ const PERSIST_MESSAGES = 20;
 const MAX_MESSAGES = 100;
 const SUMMARIZE_THRESHOLD = 30;
 
+export type RichContextProvider = (chatId: number) => Promise<string[]>;
+
 export class ConversationMemory {
     private contexts = new Map<number, ChatContext>();
     private db: DB | null = null;
+    private richContextProvider: RichContextProvider | null = null;
 
     constructor(db?: DB) {
         this.db = db ?? null;
+    }
+
+    setRichContextProvider(provider: RichContextProvider): void {
+        this.richContextProvider = provider;
     }
 
     private ensure(chatId: number): ChatContext {
@@ -116,6 +124,19 @@ export class ConversationMemory {
         this.persist(chatId);
     }
 
+    addToolCallMessage(chatId: number, toolName: string, args: Record<string, any>): void {
+        const ctx = this.ensure(chatId);
+        const argSummary = Object.keys(args).length > 0
+            ? ` with ${JSON.stringify(args)}` : "";
+        ctx.messages.push({
+            role: "tool",
+            content: `[Called: ${toolName}${argSummary}]`,
+            toolName,
+        });
+        this.trim(ctx);
+        // No persist — the next addBotMessage (from tool result) will trigger persist
+    }
+
     getHistory(chatId: number): ChatMessage[] {
         return this.ensure(chatId).messages.slice(-MAX_MESSAGES);
     }
@@ -166,7 +187,7 @@ export class ConversationMemory {
 
     // --- Context summary for LLM ---
 
-    buildContextSummary(chatId: number): string {
+    async buildContextSummary(chatId: number): Promise<string> {
         const ctx = this.ensure(chatId);
         const parts: string[] = [];
 
@@ -187,6 +208,14 @@ export class ConversationMemory {
         if (ctx.lastSchedule) parts.push(`[Last schedule: ${ctx.lastSchedule.amount} to ${ctx.lastSchedule.beneficiary}]`);
         if (ctx.lastInvoice) {
             parts.push(`[Last invoice: ${ctx.lastInvoice.vendor}, ${ctx.lastInvoice.amount} ${ctx.lastInvoice.currency}]`);
+        }
+
+        // Append real-time data (wallet balance, vendor/schedule counts)
+        if (this.richContextProvider) {
+            try {
+                const richParts = await this.richContextProvider(chatId);
+                parts.push(...richParts);
+            } catch { /* non-fatal — context enrichment should never block */ }
         }
 
         return parts.length > 0 ? "\n\nCurrent context:\n" + parts.join("\n") : "";
