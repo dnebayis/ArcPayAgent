@@ -1,3 +1,4 @@
+import { Readable } from "stream";
 import { safeSend } from "../utils/telegram";
 import type { ConversationMemory } from "../memory/conversation";
 import type TelegramBot from "node-telegram-bot-api";
@@ -23,15 +24,17 @@ export class Sender {
 
     async sendPhoto(chatId: number, buffer: Buffer, caption?: string): Promise<void> {
         try {
-            await this.bot.sendPhoto(chatId, buffer, { caption });
+            const stream = Readable.from(buffer);
+            await this.bot.sendPhoto(chatId, stream, { caption }, { contentType: "image/png" });
         } catch (err: any) {
             logger.error(chatId, "[Sender] sendPhoto failed", { error: err.message });
         }
     }
 
-    async sendDocument(chatId: number, buffer: Buffer, filename: string, caption?: string): Promise<void> {
+    async sendDocument(chatId: number, buffer: Buffer, filename: string, caption?: string, contentType = "application/octet-stream"): Promise<void> {
         try {
-            await this.bot.sendDocument(chatId, buffer, { caption }, { filename });
+            const stream = Readable.from(buffer);
+            await this.bot.sendDocument(chatId, stream, { caption }, { filename, contentType });
         } catch (err: any) {
             logger.error(chatId, "[Sender] sendDocument failed", { error: err.message });
         }

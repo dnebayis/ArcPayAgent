@@ -28,7 +28,7 @@ export interface PaymentEngineDeps {
     memory: ConversationMemory;
     sendCard: (chatId: number, text: string, keyboard: any[][]) => Promise<void>;
     send: (chatId: number, text: string) => Promise<void>;
-    sendDocument: (chatId: number, buffer: Buffer, filename: string, caption?: string) => Promise<void>;
+    sendDocument: (chatId: number, buffer: Buffer, filename: string, caption?: string, contentType?: string) => Promise<void>;
 }
 
 export class PaymentEngine {
@@ -257,7 +257,7 @@ export class PaymentEngine {
                     memo: payment.memo || undefined,
                     timestamp: Date.now(),
                 });
-                await this.deps.sendDocument(chatId, receipt, "receipt.pdf", "Payment receipt");
+                await this.deps.sendDocument(chatId, receipt, "receipt.pdf", "Payment receipt", "application/pdf");
             } catch { /* receipt failure is non-fatal */ }
 
             // Log payment

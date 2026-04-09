@@ -7,7 +7,7 @@ export interface AnalyticsActionDeps {
     analyticsEngine: AnalyticsEngine;
     paymentLog: PaymentLogStore;
     send: (chatId: number, text: string) => Promise<void>;
-    sendDocument: (chatId: number, buffer: Buffer, filename: string, caption?: string) => Promise<void>;
+    sendDocument: (chatId: number, buffer: Buffer, filename: string, caption?: string, contentType?: string) => Promise<void>;
 }
 
 export function registerAnalyticsActions(deps: AnalyticsActionDeps): void {
@@ -53,6 +53,6 @@ export function registerAnalyticsActions(deps: AnalyticsActionDeps): void {
         }
         const csv = paymentsToCSV(payments);
         const label = period === "week" ? "last-7-days" : period === "month" ? "last-30-days" : "all";
-        await deps.sendDocument(chatId, csv, `payments-${label}.csv`, `${payments.length} payment(s) exported.`);
+        await deps.sendDocument(chatId, csv, `payments-${label}.csv`, `${payments.length} payment(s) exported.`, "text/csv");
     });
 }

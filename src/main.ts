@@ -127,7 +127,7 @@ async function main(): Promise<void> {
     const send = (chatId: number, text: string) => sender.send(chatId, text).then(() => {});
     const sendCard = (chatId: number, text: string, keyboard: any[][]) => sender.sendCard(chatId, text, keyboard).then(() => {});
     const sendPhoto = (chatId: number, buffer: Buffer, caption?: string) => sender.sendPhoto(chatId, buffer, caption);
-    const sendDocument = (chatId: number, buffer: Buffer, filename: string, caption?: string) => sender.sendDocument(chatId, buffer, filename, caption);
+    const sendDocument = (chatId: number, buffer: Buffer, filename: string, caption?: string, contentType?: string) => sender.sendDocument(chatId, buffer, filename, caption, contentType);
 
     // ─── Engines ───
     const paymentEngine = new PaymentEngine({
