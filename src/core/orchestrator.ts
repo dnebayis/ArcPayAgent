@@ -104,18 +104,17 @@ export class Orchestrator {
             if (await this.tryKeywordFallback(chatId, text)) return;
             await this.sender.send(chatId,
                 "No AI key configured. To get started, type:\n\n" +
-                "  openai <your-key>\n" +
-                "  anthropic <your-key>\n" +
-                "  gemini <your-key>\n" +
-                "  qwen <your-key>\n\n" +
+                "  /llmkey <provider> <apikey>\n\n" +
+                "Example:\n" +
+                "  /llmkey openai sk-...\n\n" +
+                `Valid providers: ${VALID_PROVIDERS.join(", ")}\n\n` +
                 "Basic commands work without a key:\n" +
                 "  wallet — show balance\n" +
                 "  create wallet — set up wallet\n" +
                 "  vendors — saved contacts\n" +
                 "  schedules — active schedules\n" +
                 "  report — spending report\n" +
-                "  faucet — get testnet USDC\n\n" +
-                "If you already set a key and see this, the server restarted. Just type your key again."
+                "  faucet — get testnet USDC"
             );
             return;
         }
@@ -198,21 +197,9 @@ export class Orchestrator {
     private async tryKeywordFallback(chatId: number, text: string): Promise<boolean> {
         const t = text.toLowerCase().trim();
 
-        // LLM key setup: "openai sk-...", "set my openai key sk-...", "anthropic key sk-ant-..."
-        // Also handle legacy "/llmkey openai sk-..." format
-        const keyMatch = t.match(
-            /^(?:\/llmkey\s+|(?:set\s+)?(?:my\s+)?(?:llm\s+)?(?:api\s+)?key\s+)?([a-z]+)\s+(?:key\s+)?([A-Za-z0-9_\-\.]+)$/
-        );
-        if (keyMatch) {
-            const [, provider, key] = keyMatch;
-            if (VALID_PROVIDERS.includes(provider) && key.length > 8) {
-                await this.keys.setKey(chatId, provider, key);
-                await this.sender.send(chatId,
-                    `LLM configured: ${provider}\nYour key is stored encrypted.\n\nYou can now use natural language to interact with ArcPay.`
-                );
-                return true;
-            }
-        }
+        // Note: LLM key setup is handled exclusively by the /llmkey slash command
+        // in src/telegram/messages.ts. Natural-language key setting is disabled
+        // to prevent ambiguity with other messages.
 
         // model <name> / set model <name> — works without LLM key too
         const modelMatch = t.match(/^(?:set\s+)?model\s+(\S+)$/);

@@ -1,4 +1,5 @@
 import { loadConfig, getConfig } from "./config";
+import { BRAND_NAME, DEFAULT_BOT_USERNAME } from "./constants";
 import { logger } from "./utils/logger";
 import { formatAmount } from "./utils/format";
 import { ethers } from "ethers";
@@ -63,7 +64,7 @@ import { startHealthServer } from "./health";
 async function main(): Promise<void> {
     // ─── Config ───
     const config = loadConfig();
-    logger.info(null, "ArcPay Agent starting...");
+    logger.info(null, `${BRAND_NAME} starting...`);
 
     // ─── Provider ───
     const provider = new ethers.JsonRpcProvider(config.ARC_RPC_URL, config.ARC_CHAIN_ID);
@@ -139,7 +140,7 @@ async function main(): Promise<void> {
     });
     const requestEngine = new RequestEngine({
         requests, wallets, send, sendCard,
-        botUsername: config.TELEGRAM_BOT_USERNAME || "ArcPayAgentBot",
+        botUsername: config.TELEGRAM_BOT_USERNAME || DEFAULT_BOT_USERNAME,
     });
     const identityEngine = new IdentityEngine({
         circle, erc8004, identityStore, wallets, send,
@@ -181,7 +182,7 @@ async function main(): Promise<void> {
     // ─── Health ───
     startHealthServer(config.PORT);
 
-    logger.info(null, "ArcPay Agent ready", {
+    logger.info(null, `${BRAND_NAME} ready`, {
         mode: config.WEBHOOK_URL ? "webhook" : "polling",
     });
 

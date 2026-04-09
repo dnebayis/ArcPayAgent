@@ -5,6 +5,7 @@ import type { ERC8004Client } from "../chain/erc8004";
 import type { AgentIdentityStore, AgentIdentity } from "../store/identity";
 import type { WalletStore } from "../store/wallets";
 import { getConfig } from "../config";
+import { arcExplorerTx } from "../constants";
 
 export interface IdentityEngineDeps {
     circle: CircleClient;
@@ -36,7 +37,7 @@ export class IdentityEngine {
             lines.push(`Owner: ${identity.ownerWalletAddress.slice(0, 6)}...${identity.ownerWalletAddress.slice(-4)}`);
         }
         if (identity.registrationTxHash) {
-            lines.push(`Registration TX: https://testnet.arcscan.app/tx/${identity.registrationTxHash}`);
+            lines.push(`Registration TX: ${arcExplorerTx(identity.registrationTxHash)}`);
         }
         if (identity.validationStatus) {
             lines.push(`Validation: ${identity.validationStatus}`);

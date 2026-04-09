@@ -5,6 +5,7 @@ import type { WalletStore } from "../store/wallets";
 import type { PaymentLogStore } from "../store/payments";
 import type { ConversationMemory } from "../memory/conversation";
 import { formatAmount } from "../utils/format";
+import { arcExplorerAddress } from "../constants";
 import { logger } from "../utils/logger";
 
 export interface WalletActionDeps {
@@ -115,7 +116,7 @@ export function registerWalletActions(deps: WalletActionDeps): void {
         }
 
         parts.push(`\nWallet: ${wallet.address}`);
-        parts.push(`Explorer: https://testnet.arcscan.app/address/${wallet.address}`);
+        parts.push(`Explorer: ${arcExplorerAddress(wallet.address)}`);
 
         await deps.send(chatId, parts.join("\n"));
     });

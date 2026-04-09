@@ -45,11 +45,11 @@ export function attachMessageHandlers(bot: TelegramBot, deps: BotDeps): void {
                 "<b>Testnet USDC</b>\n" +
                 "• <code>faucet</code> — get the faucet link\n\n" +
                 "<b>Connect your AI</b>\n" +
-                "Type one of these to set your key:\n" +
-                "• <code>openai sk-...</code>\n" +
-                "• <code>anthropic sk-ant-...</code>\n" +
-                "• <code>gemini AIza...</code>\n" +
-                "• <code>qwen sk-...</code>\n\n" +
+                "Set your API key with:\n" +
+                "• <code>/llmkey &lt;provider&gt; &lt;apikey&gt;</code>\n\n" +
+                "Example:\n" +
+                "• <code>/llmkey openai sk-...</code>\n\n" +
+                `Providers: ${VALID_PROVIDERS.join(", ")}\n\n` +
                 "🐦 <a href=\"https://x.com/ArcPayAgent\">x.com/ArcPayAgent</a>",
                 { parse_mode: "HTML", disable_web_page_preview: true }
             );
@@ -87,7 +87,9 @@ export function attachMessageHandlers(bot: TelegramBot, deps: BotDeps): void {
                 "• <code>alert me when BTC hits $100k</code>\n" +
                 "• <code>list my alerts</code>\n\n" +
                 "<b>🤖 AI Settings</b>\n" +
-                "• <code>openai sk-...</code> — set API key\n" +
+                "• <code>/llmkey &lt;provider&gt; &lt;apikey&gt;</code> — set API key\n" +
+                "   e.g. <code>/llmkey openai sk-...</code>\n" +
+                `   providers: ${VALID_PROVIDERS.join(", ")}\n` +
                 "• <code>/model gpt-4o</code> — change model\n" +
                 "• <code>/provider anthropic</code> — change provider\n" +
                 "• <code>/aiconfig</code> — show current config\n" +
@@ -112,7 +114,7 @@ export function attachMessageHandlers(bot: TelegramBot, deps: BotDeps): void {
             if (model) {
                 const ok = await deps.keys.setModel(chatId, model);
                 if (ok) await deps.sender.send(chatId, `Model changed to: ${model}`);
-                else await deps.sender.send(chatId, "No LLM key configured. Set one first (e.g. openai <key>).");
+                else await deps.sender.send(chatId, "No LLM key configured. Set one first with /llmkey <provider> <apikey>.");
             }
             return;
         }
@@ -147,6 +149,34 @@ export function attachMessageHandlers(bot: TelegramBot, deps: BotDeps): void {
         if (msg.text === "/removekey") {
             await deps.keys.removeKey(chatId);
             await deps.sender.send(chatId, "LLM API key removed.");
+            return;
+        }
+
+        // /llmkey <provider> <apikey> — the ONLY way to set an LLM key
+        if (msg.text?.startsWith("/llmkey")) {
+            const rest = msg.text.slice(7).trim();
+            const parts = rest.split(/\s+/).filter(Boolean);
+            const usage =
+                "Usage: /llmkey <provider> <apikey>\n\n" +
+                "Example:\n" +
+                "  /llmkey openai sk-...\n\n" +
+                `Valid providers: ${VALID_PROVIDERS.join(", ")}`;
+            if (parts.length !== 2) {
+                await deps.sender.send(chatId, usage);
+                return;
+            }
+            const provider = parts[0].toLowerCase();
+            const key = parts[1];
+            if (!VALID_PROVIDERS.includes(provider)) {
+                await deps.sender.send(chatId, `Unknown provider: ${provider}\n\n${usage}`);
+                return;
+            }
+            if (key.length <= 8) {
+                await deps.sender.send(chatId, `Invalid API key.\n\n${usage}`);
+                return;
+            }
+            await deps.keys.setKey(chatId, provider, key);
+            await deps.sender.send(chatId, `LLM configured: ${provider}\nYour key is stored encrypted.`);
             return;
         }
 

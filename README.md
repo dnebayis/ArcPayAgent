@@ -180,10 +180,10 @@ ARC_GAS_RESERVE_USDC=0.10
 ## LLM Setup (per user)
 
 ```
-openai sk-...                  Set OpenAI key (natural language)
-anthropic sk-ant-...           Set Anthropic key
-gemini AIza...                 Set Gemini key
-/model gpt-4.1-mini           Change model
+/llmkey openai sk-...          Set OpenAI key
+/llmkey anthropic sk-ant-...   Set Anthropic key
+/llmkey gemini AIza...         Set Gemini key
+/model gpt-4.1-mini            Change model
 /provider anthropic            Switch provider (keeps key)
 /aiconfig                      Show current AI config
 /removekey                     Remove LLM key

@@ -1,0 +1,76 @@
+<svg width="1200" height="620" xmlns="http://www.w3.org/2000/svg" font-family="'Courier New', Courier, monospace">
+  <defs>
+    <marker id="arr" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <polygon points="0 0, 8 3, 0 6" fill="#484f58"/>
+    </marker>
+    <marker id="arr-blue" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <polygon points="0 0, 8 3, 0 6" fill="#1f6feb"/>
+    </marker>
+  </defs>
+
+  <!-- background -->
+  <rect width="1200" height="620" fill="#0d1117"/>
+  <!-- top accent line -->
+  <rect width="1200" height="3" fill="#388bfd"/>
+
+  <!-- title -->
+  <text x="600" y="44" text-anchor="middle" fill="#e6edf3" font-size="17">llm agent loop</text>
+
+  <!-- BOX 1: user message -->
+  <rect x="360" y="62" width="280" height="50" rx="6" fill="#161b22" stroke="#30363d" stroke-width="1.5"/>
+  <text x="500" y="92" text-anchor="middle" fill="#e6edf3" font-size="14">user message</text>
+
+  <!-- arrow 1 to 2 -->
+  <line x1="500" y1="112" x2="500" y2="138" stroke="#484f58" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <!-- BOX 2: orchestrator -->
+  <rect x="360" y="141" width="280" height="50" rx="6" fill="#161b22" stroke="#30363d" stroke-width="1.5"/>
+  <text x="500" y="171" text-anchor="middle" fill="#e6edf3" font-size="14">orchestrator</text>
+
+  <!-- rich context annotation -->
+  <line x1="640" y1="166" x2="690" y2="166" stroke="#1f6feb" stroke-width="1.5" marker-end="url(#arr-blue)"/>
+  <rect x="693" y="141" width="296" height="50" rx="6" fill="#0d2137" stroke="#1f6feb" stroke-width="1.5"/>
+  <text x="841" y="161" text-anchor="middle" fill="#58a6ff" font-size="12">rich context injected each turn</text>
+  <text x="841" y="180" text-anchor="middle" fill="#7d8590" font-size="11">wallet balance  ·  vendors  ·  schedules</text>
+
+  <!-- arrow 2 to 3 -->
+  <line x1="500" y1="191" x2="500" y2="218" stroke="#484f58" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <!-- BOX 3: llm (accented) -->
+  <rect x="360" y="221" width="280" height="66" rx="6" fill="#0d2137" stroke="#1f6feb" stroke-width="1.5"/>
+  <text x="500" y="248" text-anchor="middle" fill="#e6edf3" font-size="14">llm / your provider</text>
+  <text x="500" y="269" text-anchor="middle" fill="#7d8590" font-size="11">openai  ·  anthropic  ·  gemini  ·  groq  ·  ...</text>
+
+  <!-- arrow 3 to 4 with label -->
+  <line x1="500" y1="287" x2="500" y2="316" stroke="#484f58" stroke-width="1.5" marker-end="url(#arr)"/>
+  <text x="522" y="307" fill="#7d8590" font-size="11">tool call</text>
+
+  <!-- BOX 4: zod validate -->
+  <rect x="360" y="319" width="280" height="50" rx="6" fill="#161b22" stroke="#30363d" stroke-width="1.5"/>
+  <text x="500" y="349" text-anchor="middle" fill="#e6edf3" font-size="14">zod validate</text>
+
+  <!-- arrow 4 to 5 -->
+  <line x1="500" y1="369" x2="500" y2="396" stroke="#484f58" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <!-- BOX 5: engine / action -->
+  <rect x="360" y="399" width="280" height="50" rx="6" fill="#161b22" stroke="#30363d" stroke-width="1.5"/>
+  <text x="500" y="429" text-anchor="middle" fill="#e6edf3" font-size="14">engine / action</text>
+
+  <!-- arrow 5 to 6 -->
+  <line x1="500" y1="449" x2="500" y2="476" stroke="#484f58" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <!-- BOX 6: memory + sender -->
+  <rect x="360" y="479" width="280" height="50" rx="6" fill="#161b22" stroke="#30363d" stroke-width="1.5"/>
+  <text x="500" y="509" text-anchor="middle" fill="#e6edf3" font-size="14">memory + sender</text>
+
+  <!-- feedback loop: box 6 right side back to box 3 right side -->
+  <path d="M 640 504 C 810 504 810 254 640 254" stroke="#484f58" stroke-width="1.5" stroke-dasharray="6 3" fill="none" marker-end="url(#arr)"/>
+
+  <!-- feedback annotations -->
+  <text x="870" y="370" text-anchor="middle" fill="#7d8590" font-size="12">history rebuilt</text>
+  <text x="870" y="388" text-anchor="middle" fill="#7d8590" font-size="12">each iteration</text>
+  <text x="870" y="406" text-anchor="middle" fill="#7d8590" font-size="12">llm sees results</text>
+
+  <!-- bottom label -->
+  <text x="600" y="592" text-anchor="middle" fill="#30363d" font-size="12">@ArcPayAgent  ·  github.com/dnebayis/ArcPayAgent</text>
+</svg>

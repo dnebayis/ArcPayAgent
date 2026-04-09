@@ -123,14 +123,16 @@ SSL is auto-enabled for non-localhost connections (Northflank, Railway, Render, 
 
 Users set their own AI keys via Telegram. Supported providers:
 
+All keys are set via the `/llmkey <provider> <apikey>` command:
+
 | Provider | Setup |
 |----------|-------|
-| OpenAI | `openai sk-...` |
-| Anthropic | `anthropic sk-ant-...` |
-| Gemini | `gemini AIza...` |
-| Qwen | `qwen sk-...` |
-| Groq | `groq gsk_...` |
-| DeepSeek | `deepseek sk-...` |
+| OpenAI | `/llmkey openai sk-...` |
+| Anthropic | `/llmkey anthropic sk-ant-...` |
+| Gemini | `/llmkey gemini AIza...` |
+| Qwen | `/llmkey qwen sk-...` |
+| Groq | `/llmkey groq gsk_...` |
+| DeepSeek | `/llmkey deepseek sk-...` |
 
 Keys are encrypted at rest using `LLM_KEY_SECRET` (AES-256-GCM).
 
@@ -210,7 +212,7 @@ Add secrets: `TELEGRAM_TOKEN`, `CIRCLE_API_KEY`, `CIRCLE_ENTITY_SECRET`, `LLM_KE
 5. Deploy and verify `GET /health` returns 200
 6. In Telegram: `create wallet`
 7. Fund wallet: `faucet` → get testnet USDC link
-8. Set LLM key: `openai <your-key>` (or anthropic / gemini / qwen)
+8. Set LLM key: `/llmkey openai <your-key>` (or anthropic / gemini / qwen)
 9. Test: `send 0.01 usdc to 0x<test_address>`
 10. Verify payment card shows `[Confirm]` and `[Cancel]` buttons
 11. Confirm payment, verify tx appears on arcscan

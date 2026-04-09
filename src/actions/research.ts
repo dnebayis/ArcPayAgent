@@ -1,5 +1,6 @@
 import { registerAction } from "./registry";
 import { getCryptoPrices, getFxRate, getArcStats, formatLarge } from "../research/tools";
+import { ARC_EXPLORER_URL, arcExplorerAddress } from "../constants";
 import type { WalletStore } from "../store/wallets";
 
 export interface ResearchActionDeps {
@@ -81,7 +82,7 @@ export function registerResearchActions(deps: ResearchActionDeps): void {
         try {
             const stats = await getArcStats(deps.provider);
             await deps.send(chatId,
-                `Arc Network\n\nLatest block: ${stats.latestBlock.toLocaleString()}\nChain ID: ${stats.chainId}\nExplorer: https://testnet.arcscan.app`
+                `Arc Network\n\nLatest block: ${stats.latestBlock.toLocaleString()}\nChain ID: ${stats.chainId}\nExplorer: ${ARC_EXPLORER_URL}`
             );
         } catch {
             await deps.send(chatId, "Failed to fetch Arc network stats.");
@@ -95,7 +96,7 @@ export function registerResearchActions(deps: ResearchActionDeps): void {
             return;
         }
         await deps.send(chatId,
-            `Arc Activity\n\nWallet: ${wallet}\n\nView on explorer:\nhttps://testnet.arcscan.app/address/${wallet}`
+            `Arc Activity\n\nWallet: ${wallet}\n\nView on explorer:\n${arcExplorerAddress(wallet)}`
         );
     });
 }

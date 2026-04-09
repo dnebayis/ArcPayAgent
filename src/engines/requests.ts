@@ -1,4 +1,5 @@
 import { logger } from "../utils/logger";
+import { DEFAULT_BOT_USERNAME } from "../constants";
 import type { PaymentRequestStore } from "../store/requests";
 import type { WalletStore } from "../store/wallets";
 
@@ -26,7 +27,7 @@ export class RequestEngine {
 
         const req = await this.deps.requests.create(chatId, address, amount, token);
 
-        const botName = this.deps.botUsername || "ArcPayBot";
+        const botName = this.deps.botUsername || DEFAULT_BOT_USERNAME;
         const deepLink = `https://t.me/${botName}?start=pay_${req.id}`;
 
         const text = `Payment Request Created\n\nAmount: ${amount.toFixed(2)} ${token}\nRequest ID: ${req.id}\n\nShare this link to receive payment:\n${deepLink}`;

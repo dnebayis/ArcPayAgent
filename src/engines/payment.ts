@@ -10,6 +10,7 @@ import type { SubmittedTxStore, SubmittedTx } from "../store/submitted";
 import type { PaymentLogStore } from "../store/payments";
 import type { ConversationMemory } from "../memory/conversation";
 import { getConfig } from "../config";
+import { DEFAULT_PAYMENT_MEMO, arcExplorerTx } from "../constants";
 import crypto from "crypto";
 
 const PAYMENT_EXPIRY_MS = 30 * 60 * 1000; // 30 minutes
@@ -205,7 +206,7 @@ export class PaymentEngine {
             }
 
             // Step 2: Execute payment via router
-            const memo = payment.memo || "ArcPay";
+            const memo = payment.memo || DEFAULT_PAYMENT_MEMO;
             const payData = this.deps.router.encodePay(payment.beneficiary, amount, memo);
 
             const payTx: SubmittedTx = {
@@ -240,7 +241,7 @@ export class PaymentEngine {
 
             // Success
             const displayTo = payment.vendorName || payment.beneficiary;
-            const explorerUrl = `https://testnet.arcscan.app/tx/${payResult.txHash}`;
+            const explorerUrl = arcExplorerTx(payResult.txHash || "");
             await this.deps.send(chatId, `Payment of ${payment.amountStr} ${token} to ${displayTo} completed.\n\nTx: ${explorerUrl}`);
 
             // Log payment

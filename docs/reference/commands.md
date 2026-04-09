@@ -12,14 +12,16 @@
 | `/removekey` | Remove LLM key |
 | `/reset` | Clear conversation history |
 
-## LLM Key Setup (natural language)
+## LLM Key Setup
+
+All keys are set with the `/llmkey <provider> <apikey>` command.
 
 | Input | Purpose |
 |-------|---------|
-| `openai sk-...` | Set OpenAI key |
-| `anthropic sk-ant-...` | Set Anthropic key |
-| `gemini AIza...` | Set Gemini key |
-| `qwen sk-...` | Set Qwen key |
+| `/llmkey openai sk-...` | Set OpenAI key |
+| `/llmkey anthropic sk-ant-...` | Set Anthropic key |
+| `/llmkey gemini AIza...` | Set Gemini key |
+| `/llmkey qwen sk-...` | Set Qwen key |
 
 Supported providers: `openai`, `anthropic`, `gemini`, `groq`, `deepseek`, `together`, `mistral`, `openrouter`, `qwen`
 

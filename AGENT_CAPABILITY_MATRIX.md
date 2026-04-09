@@ -52,7 +52,7 @@ Operational reference for what the agent does, what is partial, and what is out 
 | Feature | Status | Notes |
 |---------|--------|-------|
 | BYOK per user | `Supported` | Encrypted at rest |
-| Set key (natural language) | `Supported` | `openai sk-...` / `anthropic sk-ant-...` |
+| Set key | `Supported` | `/llmkey <provider> <apikey>` |
 | /model change | `Supported` | `/model <name>` |
 | /provider switch | `Supported` | `/provider <name>` — keeps existing key |
 | /aiconfig | `Supported` | Shows provider + model + available models |
@@ -124,7 +124,7 @@ The engine/action is always the sole sender, preventing button disappearing.
 - `show my price alerts`
 
 ### LLM Config
-- `openai sk-...` (natural language key entry)
+- `/llmkey openai sk-...` (set API key)
 - `/model gpt-4.1`
 - `/provider anthropic`
 - `/aiconfig`

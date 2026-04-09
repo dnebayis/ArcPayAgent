@@ -48,7 +48,7 @@ is this safe? → risk explanation from LLM
 ### 6. LLM Config
 
 ```
-openai sk-...            → "LLM configured: openai"
+/llmkey openai sk-...    → "LLM configured: openai"
 /model gpt-4.1           → "Model changed to: gpt-4.1"
 /aiconfig                → shows provider + model
 ```

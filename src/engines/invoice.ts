@@ -40,7 +40,7 @@ export class InvoiceEngine {
     async analyze(chatId: number, extractedText: string, messageId?: number): Promise<void> {
         const auth = await this.deps.getLLMAuth(chatId);
         if (!auth) {
-            await this.deps.send(chatId, "Please set your LLM API key first with /llmkey.");
+            await this.deps.send(chatId, "Please set your LLM API key first:\n\n  /llmkey <provider> <apikey>\n\nExample:\n  /llmkey openai sk-...");
             return;
         }
 
