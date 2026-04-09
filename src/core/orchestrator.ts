@@ -30,6 +30,7 @@ const SILENT_ACTIONS = new Set([
     "create_payment_request", "analyze_invoice",
     "remove_vendor", "remove_all_vendors", "save_vendor",
     "set_model", "set_provider", "show_ai_config", "remove_ai_key", "reset_conversation",
+    "generate_wallet_qr", "export_payments",
 ]);
 
 const CONFIRMATION_PHRASES = new Set([

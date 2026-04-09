@@ -15,6 +15,7 @@ export interface WalletActionDeps {
     paymentLog: PaymentLogStore;
     memory: ConversationMemory;
     send: (chatId: number, text: string) => Promise<void>;
+    sendPhoto: (chatId: number, buffer: Buffer, caption?: string) => Promise<void>;
 }
 
 export function registerWalletActions(deps: WalletActionDeps): void {
@@ -70,6 +71,22 @@ export function registerWalletActions(deps: WalletActionDeps): void {
             `This is a Circle Developer-Controlled Wallet. Private keys are managed by Circle's secure infrastructure and cannot be exported. ` +
             `You can use the wallet address above to receive funds from other wallets or exchanges.`
         );
+    });
+
+    registerAction("generate_wallet_qr", async (chatId) => {
+        const wallet = await deps.wallets.getWallet(chatId);
+        if (!wallet) {
+            await deps.send(chatId, "You need a wallet first. Say \"create wallet\".");
+            return;
+        }
+        try {
+            const QRCode = await import("qrcode");
+            const buffer = await QRCode.toBuffer(wallet.address, { type: "png", width: 400 });
+            await deps.sendPhoto(chatId, buffer, `Wallet: ${wallet.address}`);
+        } catch (err: any) {
+            logger.error(chatId, "[Wallet] QR generation failed", { error: err.message });
+            await deps.send(chatId, `Wallet address: ${wallet.address}`);
+        }
     });
 
     registerAction("wallet_intelligence", async (chatId) => {

@@ -1,6 +1,7 @@
 import { safeSend } from "../utils/telegram";
 import type { ConversationMemory } from "../memory/conversation";
 import type TelegramBot from "node-telegram-bot-api";
+import { logger } from "../utils/logger";
 
 /**
  * Centralized sender. Every outgoing message goes through here
@@ -18,6 +19,22 @@ export class Sender {
     async send(chatId: number, text: string, opts?: TelegramBot.SendMessageOptions): Promise<TelegramBot.Message | undefined> {
         this.memory.addBotMessage(chatId, text);
         return safeSend(this.bot, chatId, text, opts);
+    }
+
+    async sendPhoto(chatId: number, buffer: Buffer, caption?: string): Promise<void> {
+        try {
+            await this.bot.sendPhoto(chatId, buffer, { caption });
+        } catch (err: any) {
+            logger.error(chatId, "[Sender] sendPhoto failed", { error: err.message });
+        }
+    }
+
+    async sendDocument(chatId: number, buffer: Buffer, filename: string, caption?: string): Promise<void> {
+        try {
+            await this.bot.sendDocument(chatId, buffer, { caption }, { filename });
+        } catch (err: any) {
+            logger.error(chatId, "[Sender] sendDocument failed", { error: err.message });
+        }
     }
 
     async sendCard(

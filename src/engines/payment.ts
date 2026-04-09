@@ -11,6 +11,7 @@ import type { PaymentLogStore } from "../store/payments";
 import type { ConversationMemory } from "../memory/conversation";
 import { getConfig } from "../config";
 import { DEFAULT_PAYMENT_MEMO, arcExplorerTx } from "../constants";
+import { generateReceipt } from "../utils/receipt";
 import crypto from "crypto";
 
 const PAYMENT_EXPIRY_MS = 30 * 60 * 1000; // 30 minutes
@@ -27,6 +28,7 @@ export interface PaymentEngineDeps {
     memory: ConversationMemory;
     sendCard: (chatId: number, text: string, keyboard: any[][]) => Promise<void>;
     send: (chatId: number, text: string) => Promise<void>;
+    sendDocument: (chatId: number, buffer: Buffer, filename: string, caption?: string) => Promise<void>;
 }
 
 export class PaymentEngine {
@@ -243,6 +245,20 @@ export class PaymentEngine {
             const displayTo = payment.vendorName || payment.beneficiary;
             const explorerUrl = arcExplorerTx(payResult.txHash || "");
             await this.deps.send(chatId, `Payment of ${payment.amountStr} ${token} to ${displayTo} completed.\n\nTx: ${explorerUrl}`);
+
+            // Auto-send PDF receipt (non-blocking — receipt failure must never affect payment)
+            try {
+                const receipt = await generateReceipt({
+                    vendor: payment.vendorName || payment.beneficiary,
+                    address: payment.beneficiary,
+                    amount: payment.amountStr,
+                    token,
+                    txHash: payResult.txHash || undefined,
+                    memo: payment.memo || undefined,
+                    timestamp: Date.now(),
+                });
+                await this.deps.sendDocument(chatId, receipt, "receipt.pdf", "Payment receipt");
+            } catch { /* receipt failure is non-fatal */ }
 
             // Log payment
             await this.deps.paymentLog.logPayment(chatId, {

@@ -126,10 +126,12 @@ async function main(): Promise<void> {
     const sender = new Sender(bot, memory);
     const send = (chatId: number, text: string) => sender.send(chatId, text).then(() => {});
     const sendCard = (chatId: number, text: string, keyboard: any[][]) => sender.sendCard(chatId, text, keyboard).then(() => {});
+    const sendPhoto = (chatId: number, buffer: Buffer, caption?: string) => sender.sendPhoto(chatId, buffer, caption);
+    const sendDocument = (chatId: number, buffer: Buffer, filename: string, caption?: string) => sender.sendDocument(chatId, buffer, filename, caption);
 
     // ─── Engines ───
     const paymentEngine = new PaymentEngine({
-        circle, tokens, router, wallets, vendors, pending, submitted, paymentLog, memory, sendCard, send,
+        circle, tokens, router, wallets, vendors, pending, submitted, paymentLog, memory, sendCard, send, sendDocument,
     });
     const invoiceEngine = new InvoiceEngine({
         invoices, vendors, memory, send, sendCard,
@@ -153,8 +155,8 @@ async function main(): Promise<void> {
     // ─── Register actions ───
     registerPaymentActions({ paymentEngine, schedules, vendors, wallets, memory, send });
     registerVendorActions({ vendors, memory, send });
-    registerWalletActions({ circle, tokens, wallets, paymentLog, memory, send });
-    registerAnalyticsActions({ analyticsEngine });
+    registerWalletActions({ circle, tokens, wallets, paymentLog, memory, send, sendPhoto });
+    registerAnalyticsActions({ analyticsEngine, paymentLog, send, sendDocument });
     registerAlertActions({ alerts, watch, wallets, send });
     registerResearchActions({ wallets, provider, send });
     registerAgentActions({ identityEngine, requestEngine, invoiceEngine, send });

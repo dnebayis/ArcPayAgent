@@ -28,6 +28,7 @@ export const TERMINAL_ACTIONS = new Set([
     "agent_status", "agent_identity", "agent_validation_status",
     "create_payment_request", "analyze_invoice",
     "set_model", "set_provider", "show_ai_config", "remove_ai_key", "reset_conversation",
+    "generate_wallet_qr", "export_payments",
 ]);
 
 export const TOOL_DEFINITIONS: ToolDef[] = [
@@ -321,6 +322,22 @@ export const TOOL_DEFINITIONS: ToolDef[] = [
         name: "reset_conversation",
         description: "Clear conversation history. Triggered by 'reset', 'start over', 'clear chat', 'forget everything'.",
         parameters: { type: "object", properties: {}, required: [] },
+    },
+    {
+        name: "generate_wallet_qr",
+        description: "Generate a QR code image of the user's wallet address for easy sharing or scanning. Triggered by 'my qr', 'qr code', 'wallet qr', 'show qr'.",
+        parameters: { type: "object", properties: {}, required: [] },
+    },
+    {
+        name: "export_payments",
+        description: "Export payment history as a downloadable CSV file. Triggered by 'export payments', 'download history', 'export csv'. Optional period: week, month, or all.",
+        parameters: {
+            type: "object",
+            properties: {
+                period: { type: "string", enum: ["week", "month", "all"], description: "Time range to export" },
+            },
+            required: [],
+        },
     },
 ];
 
