@@ -20,6 +20,11 @@ It combines:
 
 ## Architecture
 
+![system architecture](diagrams/system-overview.svg)
+
+<details>
+<summary>File tree</summary>
+
 ```
 src/
 ├── config.ts                 Zod env schema
@@ -95,20 +100,17 @@ src/
     └── parser.ts             PDF + image text extraction
 ```
 
-## Key Design: SILENT_ACTIONS
+</details>
 
-The orchestrator **never** sends the LLM's pre-tool text for actions that produce their own output (payment cards, lists, balances). The engine is the sole sender.
+## Agent Loop
 
-```
-User: "send 5 usdc to jack"
-  → LLM: create_payment tool call
-  → SILENT_ACTION → LLM message suppressed
-  → PaymentEngine.prepare() → sends card with [Confirm] [Cancel]
-```
+![agent loop](diagrams/agent-loop.svg)
 
-This makes the button-disappearing bug structurally impossible.
+The orchestrator **never** sends the LLM's pre-tool text for SILENT_ACTIONS (payment cards, lists, balances). The engine is the sole sender — this makes the button-disappearing bug structurally impossible.
 
 ## Payment Lifecycle
+
+![payment lifecycle](diagrams/payment-lifecycle.svg)
 
 1. `send 5 usdc to jack` → orchestrator → `create_payment` (SILENT)
 2. PaymentEngine resolves vendor, stores pending payment

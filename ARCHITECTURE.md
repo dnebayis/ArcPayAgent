@@ -4,15 +4,16 @@
 
 ArcPay Agent is a Telegram payment assistant for Arc Testnet.
 
-The system is organized around clear, non-overlapping layers:
-
-```
-Telegram → Orchestrator → LLM (tool-calling) → Action Registry → Engines → Chain/Store
-```
+![system architecture](diagrams/system-overview.svg)
 
 Entry point: `src/main.ts`
 
 ## Runtime Flow
+
+![agent loop](diagrams/agent-loop.svg)
+
+<details>
+<summary>Text flow</summary>
 
 ```
 User message
@@ -54,6 +55,8 @@ core/sender.ts (send / sendCard)
   └─ memory.addBotMessage() + safeSend()
 ```
 
+</details>
+
 ## SILENT_ACTIONS
 
 Actions where the LLM's pre-tool message is **never** sent to Telegram.
@@ -74,14 +77,10 @@ const SILENT_ACTIONS = new Set([
 
 `core/state.ts` (FlowStateManager) wraps the FlowState stored in `memory/conversation.ts`.
 
-```
-FlowState:
-  "idle"
-  "awaiting_amount"         beneficiary known, amount missing
-  "awaiting_confirmation"   review card shown, awaiting button press
-```
+![flowstate machine](diagrams/flowstate.svg)
 
-Transitions:
+States: `idle` · `awaiting_amount` · `awaiting_confirmation`
+
 - `idle → awaiting_confirmation`: PaymentEngine.prepare() stores pending + sends card
 - `idle → awaiting_amount`: create_payment called without amount
 - `awaiting_confirmation → idle`: Confirm or Cancel button clicked
@@ -115,7 +114,9 @@ All outgoing Telegram messages pass through here.
 No bot message ever bypasses memory sync.
 
 ### `src/engines/payment.ts`
-Full payment lifecycle:
+
+![payment lifecycle](diagrams/payment-lifecycle.svg)
+
 1. `prepare()` → resolve vendor, check wallet, store pending, send review card
 2. `processCallback("confirm")` → `execute()`
 3. `execute()` → balance check → Circle approve TX → Circle pay TX → poll terminal

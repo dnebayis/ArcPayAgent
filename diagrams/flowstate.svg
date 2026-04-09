@@ -1,0 +1,62 @@
+<svg width="1200" height="380" xmlns="http://www.w3.org/2000/svg" font-family="'Courier New', Courier, monospace">
+  <defs>
+    <marker id="arr" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <polygon points="0 0, 8 3, 0 6" fill="#484f58"/>
+    </marker>
+    <marker id="arr-g" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <polygon points="0 0, 8 3, 0 6" fill="#238636"/>
+    </marker>
+    <marker id="arr-r" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <polygon points="0 0, 8 3, 0 6" fill="#da3633"/>
+    </marker>
+    <marker id="arr-y" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <polygon points="0 0, 8 3, 0 6" fill="#9e6a03"/>
+    </marker>
+  </defs>
+
+  <rect width="1200" height="380" fill="#0d1117"/>
+  <rect width="1200" height="3" fill="#388bfd"/>
+
+  <text x="600" y="36" text-anchor="middle" fill="#e6edf3" font-size="16">flowstate machine</text>
+
+  <!-- STATE: idle -->
+  <rect x="490" y="60" width="220" height="70" rx="8" fill="#161b22" stroke="#388bfd" stroke-width="2"/>
+  <text x="600" y="92" text-anchor="middle" fill="#58a6ff" font-size="15">idle</text>
+  <text x="600" y="114" text-anchor="middle" fill="#7d8590" font-size="11">default state</text>
+
+  <!-- idle → awaiting_amount (left down) -->
+  <line x1="490" y1="110" x2="300" y2="190" stroke="#9e6a03" stroke-width="1.5" marker-end="url(#arr-y)"/>
+  <text x="345" y="152" text-anchor="middle" fill="#d29922" font-size="11">create_payment</text>
+  <text x="345" y="165" text-anchor="middle" fill="#d29922" font-size="11">(no amount)</text>
+
+  <!-- idle → awaiting_confirmation (right down) -->
+  <line x1="710" y1="110" x2="900" y2="190" stroke="#238636" stroke-width="1.5" marker-end="url(#arr-g)"/>
+  <text x="845" y="152" text-anchor="middle" fill="#3fb950" font-size="11">create_payment</text>
+  <text x="845" y="165" text-anchor="middle" fill="#3fb950" font-size="11">(with amount)</text>
+
+  <!-- STATE: awaiting_amount -->
+  <rect x="120" y="193" width="260" height="70" rx="8" fill="#161b22" stroke="#d29922" stroke-width="2"/>
+  <text x="250" y="225" text-anchor="middle" fill="#d29922" font-size="15">awaiting_amount</text>
+  <text x="250" y="247" text-anchor="middle" fill="#7d8590" font-size="11">beneficiary known, amount missing</text>
+
+  <!-- awaiting_amount → awaiting_confirmation -->
+  <line x1="380" y1="228" x2="820" y2="228" stroke="#238636" stroke-width="1.5" marker-end="url(#arr-g)"/>
+  <text x="600" y="220" text-anchor="middle" fill="#3fb950" font-size="11">user types a number</text>
+
+  <!-- STATE: awaiting_confirmation -->
+  <rect x="820" y="193" width="260" height="70" rx="8" fill="#161b22" stroke="#238636" stroke-width="2"/>
+  <text x="950" y="218" text-anchor="middle" fill="#3fb950" font-size="13">awaiting_confirmation</text>
+  <text x="950" y="238" text-anchor="middle" fill="#7d8590" font-size="11">review card shown</text>
+  <text x="950" y="254" text-anchor="middle" fill="#7d8590" font-size="11">awaiting button press</text>
+
+  <!-- awaiting_confirmation → idle via Confirm -->
+  <path d="M 950 263 C 950 320 700 340 600 310 C 530 295 520 190 570 145" stroke="#238636" stroke-width="1.5" stroke-dasharray="5 3" fill="none" marker-end="url(#arr-g)"/>
+  <text x="760" y="338" text-anchor="middle" fill="#3fb950" font-size="11">[Confirm]  →  execute()  →  idle</text>
+
+  <!-- awaiting_confirmation → idle via Cancel -->
+  <path d="M 820 245 C 720 290 680 330 640 315 C 610 305 590 280 590 260 C 590 230 590 200 590 160 C 590 140 593 130 600 130" stroke="#da3633" stroke-width="1.5" stroke-dasharray="5 3" fill="none" marker-end="url(#arr-r)"/>
+  <text x="690" y="280" text-anchor="middle" fill="#f85149" font-size="11">[Cancel]  →  clear  →  idle</text>
+
+  <!-- bottom label -->
+  <text x="600" y="368" text-anchor="middle" fill="#30363d" font-size="12">@ArcPayAgent  ·  Arc Testnet</text>
+</svg>
